@@ -119,6 +119,8 @@ def decide_llm(
     levels = [e.level for e in entries]
     if not llm.is_low_confidence(len(entries), failures, used_toc, levels, page_count):
         return False
+    # Key pre-check is Anthropic-specific by design (the only shipped backend);
+    # other providers surface missing-key errors via the auto-mode exception path.
     if args.model.startswith("anthropic") and not os.environ.get("ANTHROPIC_API_KEY"):
         print("warning: outline confidence is low but ANTHROPIC_API_KEY is not set; "
               "continuing without LLM", file=sys.stderr)
@@ -139,7 +141,8 @@ def build_llm_context(lines: list[Line], toc_pages: list[int]) -> str:
     ]
     return (
         f"Candidate heading lines (body text size {body:.1f}; physical_page is "
-        f"0-based, not a printed page number):\n" + "\n".join(candidates[:400])
+        f"0-based, not a printed page number):\n"
+        + "\n".join(candidates[:400])  # cap keeps the prompt within a sane token budget
     )
 
 
