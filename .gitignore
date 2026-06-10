@@ -4,4 +4,8 @@ __pycache__/
 build/
 dist/
 .venv/
+tests/
 *.bookmarked.pdf
+.claude/
+comp0009_notes.pdf
+comp0009_bookmarked.pdf
