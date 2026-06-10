@@ -10,6 +10,12 @@ _TOC_LINE = re.compile(r"^(?P<title>.+?)[\s.]{2,}(?P<page>\d{1,4})$")
 _NUMBERING = re.compile(r"^(?P<num>\d+(?:\.\d+)*)[.\s]\s*")
 
 
+def is_toc_row(text: str) -> bool:
+    """True for lines that belong to the TOC itself (its heading or entry rows)."""
+    text = text.strip()
+    return bool(_TOC_HEADING.match(text) or _TOC_LINE.match(text))
+
+
 def find_toc_pages(lines: list[Line], page_count: int) -> list[int]:
     """Return the (contiguous) physical page indices that look like a TOC."""
     scan_limit = max(30, int(page_count * 0.15))
