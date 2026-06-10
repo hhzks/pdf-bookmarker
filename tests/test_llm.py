@@ -1,9 +1,27 @@
+import os
 from types import SimpleNamespace
 
 import pytest
 
 from pdf_bookmarker import llm
 from pdf_bookmarker.models import OutlineEntry
+
+
+@pytest.mark.skipif(
+    not os.environ.get("PDF_BOOKMARKER_LIVE_LLM"),
+    reason="live API test; set PDF_BOOKMARKER_LIVE_LLM=1 (requires ANTHROPIC_API_KEY)",
+)
+def test_anthropic_backend_live():
+    backend = llm.AnthropicBackend()
+    entries = backend.parse_outline(
+        "Table of contents text:\n"
+        "1 Introduction .......... 3\n"
+        "1.1 Background .......... 3\n"
+        "2 Methods .......... 4"
+    )
+    assert entries
+    assert entries[0].level == 1
+    assert any(e.level == 2 for e in entries)
 
 
 class FakeMessages:
