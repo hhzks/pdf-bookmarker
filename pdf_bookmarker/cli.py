@@ -147,6 +147,10 @@ def build_llm_context(lines: list[Line], toc_pages: list[int]) -> str:
 
 
 def print_outline(entries: list[OutlineEntry]) -> None:
+    try:  # Windows consoles (cp1252) cannot encode every glyph; never crash
+        sys.stdout.reconfigure(errors="replace")
+    except AttributeError:
+        pass  # captured/redirected stdout may not support reconfigure
     for e in entries:
         page = "?" if e.page is None else e.page + 1
         print(f"{'  ' * (e.level - 1)}{e.title}  (page {page})")
