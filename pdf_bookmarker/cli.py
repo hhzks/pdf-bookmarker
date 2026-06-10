@@ -63,7 +63,7 @@ def main(argv: list[str] | None = None) -> int:
             entries, failures = locator.locate_entries(
                 llm_entries, lines, skip_pages=set(toc_pages)
             )
-        except ValueError as exc:  # unknown provider
+        except llm.UnknownProviderError as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 2
         except Exception as exc:
@@ -119,10 +119,11 @@ def decide_llm(
     levels = [e.level for e in entries]
     if not llm.is_low_confidence(len(entries), failures, used_toc, levels, page_count):
         return False
-    # Key pre-check is Anthropic-specific by design (the only shipped backend);
-    # other providers surface missing-key errors via the auto-mode exception path.
-    if args.model.startswith("anthropic") and not os.environ.get("ANTHROPIC_API_KEY"):
-        print("warning: outline confidence is low but ANTHROPIC_API_KEY is not set; "
+    # Pre-check only covers shipped providers (llm.ENV_KEYS); unknown ones
+    # surface missing-key errors via the auto-mode exception path.
+    key_names = llm.ENV_KEYS.get(args.model.partition(":")[0])
+    if key_names and not any(os.environ.get(name) for name in key_names):
+        print(f"warning: outline confidence is low but {key_names[0]} is not set; "
               "continuing without LLM", file=sys.stderr)
         return False
     return True

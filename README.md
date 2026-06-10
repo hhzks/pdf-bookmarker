@@ -26,9 +26,17 @@ auto mode warns and continues heuristics-only.
 ### Choosing a model
 
     pdf-bookmarker input.pdf --model anthropic:claude-opus-4-8
+    pdf-bookmarker input.pdf --model gemini                        # gemini-3.5-flash
+    pdf-bookmarker input.pdf --model gemini:gemini-3.1-pro-preview
 
-The LLM layer is provider-agnostic: implement `pdf_bookmarker.llm.LLMBackend`
-and register the class in `_BACKENDS` to add another provider.
+The Google Gemini backend needs the `gemini` extra and a key in
+`GEMINI_API_KEY` (or `GOOGLE_API_KEY`):
+
+    pip install -e ".[gemini]"
+
+The LLM layer is provider-agnostic: implement `pdf_bookmarker.llm.LLMBackend`,
+register the class in `_BACKENDS`, and (optionally) list its key env vars in
+`ENV_KEYS` to add another provider.
 
 ## Limitations
 

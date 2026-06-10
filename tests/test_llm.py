@@ -76,6 +76,70 @@ def test_get_backend_unknown_provider():
         llm.get_backend("bogus:model-x")
 
 
+class FakeGeminiModels:
+    def __init__(self, captured):
+        self._captured = captured
+
+    def generate_content(self, **kwargs):
+        self._captured.update(kwargs)
+        return SimpleNamespace(
+            parsed=llm._Outline(
+                entries=[llm._OutlineItem(title="Intro", level=1, printed_page=3)]
+            )
+        )
+
+
+def _fake_gemini(monkeypatch, captured):
+    class FakeClient:
+        def __init__(self):
+            self.models = FakeGeminiModels(captured)
+
+    monkeypatch.setattr("google.genai.Client", FakeClient)
+
+
+def test_gemini_backend_parses_outline(monkeypatch):
+    captured = {}
+    _fake_gemini(monkeypatch, captured)
+    backend = llm.GeminiBackend(model="gemini-3.5-flash")
+    entries = backend.parse_outline("1 Intro .......... 3")
+    assert entries == [OutlineEntry(title="Intro", level=1, printed_page=3)]
+    assert captured["model"] == "gemini-3.5-flash"
+    assert "1 Intro" in captured["contents"]
+    assert captured["config"]["response_schema"] is llm._Outline
+    assert captured["config"]["response_mime_type"] == "application/json"
+
+
+def test_get_backend_gemini_default_model(monkeypatch):
+    captured = {}
+    _fake_gemini(monkeypatch, captured)
+    llm.get_backend("gemini").parse_outline("x")
+    assert captured["model"] == "gemini-3.5-flash"
+
+
+def test_get_backend_gemini_model_passthrough(monkeypatch):
+    captured = {}
+    _fake_gemini(monkeypatch, captured)
+    llm.get_backend("gemini:gemini-3.1-pro-preview").parse_outline("x")
+    assert captured["model"] == "gemini-3.1-pro-preview"
+
+
+@pytest.mark.skipif(
+    not os.environ.get("PDF_BOOKMARKER_LIVE_LLM"),
+    reason="live API test; set PDF_BOOKMARKER_LIVE_LLM=1 (requires GEMINI_API_KEY)",
+)
+def test_gemini_backend_live():
+    backend = llm.GeminiBackend()
+    entries = backend.parse_outline(
+        "Table of contents text:\n"
+        "1 Introduction .......... 3\n"
+        "1.1 Background .......... 3\n"
+        "2 Methods .......... 4"
+    )
+    assert entries
+    assert entries[0].level == 1
+    assert any(e.level == 2 for e in entries)
+
+
 @pytest.mark.parametrize(
     "detected,failures,used_toc,levels,page_count,expected",
     [
