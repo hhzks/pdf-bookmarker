@@ -14,7 +14,7 @@ def body_text_size(lines: list[Line]) -> float:
     """The dominant font size, weighted by amount of text."""
     weights: Counter[float] = Counter()
     for line in lines:
-        weights[round(line.size, 1)] += len(line.text.split())
+        weights[round(line.size, 1)] += len(line.text)
     return weights.most_common(1)[0][0]
 
 
