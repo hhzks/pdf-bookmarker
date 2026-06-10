@@ -26,6 +26,34 @@ def test_writes_bookmarks_from_toc(toc_pdf, tmp_path):
     ]
 
 
+def test_writes_bookmarks_from_fragmented_pdf(fragmented_pdf, tmp_path):
+    """LaTeX-style PDFs: split number/title fragments, chapter TOC rows
+    without dot leaders, subchapters nested under their parent chapter."""
+    out = tmp_path / "out.pdf"
+    rc = cli.main([str(fragmented_pdf), "-o", str(out), "--no-llm"])
+    assert rc == 0
+    toc = fitz.open(str(out)).get_toc()
+    assert [item[:3] for item in toc] == [
+        [1, "1 Reading", 2],
+        [1, "2 Logic and background", 3],
+        [1, "3 Revision", 4],
+        [2, "3.1 Propositional Logic", 4],
+        [2, "3.2 Predicate Logic", 5],
+    ]
+
+
+def test_print_outline_survives_unencodable_console(monkeypatch):
+    """A cp1252 Windows console cannot encode every glyph; never crash."""
+    import io
+    import sys
+
+    buf = io.BytesIO()
+    monkeypatch.setattr(sys, "stdout", io.TextIOWrapper(buf, encoding="cp1252"))
+    cli.print_outline([OutlineEntry(title="A ∨ B", level=1, page=0)])
+    sys.stdout.flush()
+    assert b"A ? B" in buf.getvalue()
+
+
 def test_writes_bookmarks_from_headings(headings_pdf, tmp_path):
     out = tmp_path / "out.pdf"
     rc = cli.main([str(headings_pdf), "-o", str(out), "--no-llm"])

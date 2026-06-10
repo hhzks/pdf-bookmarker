@@ -90,6 +90,42 @@ def ghost_toc_pdf(tmp_path_factory):
 
 
 @pytest.fixture(scope="session")
+def fragmented_pdf(tmp_path_factory):
+    """LaTeX-style layout: heading numbers, titles and TOC page numbers are
+    separate same-baseline text objects; chapter TOC rows have no dot leaders.
+    Printed page N == physical index N-1."""
+    doc = fitz.open()
+
+    def frags(page, y, pieces, size=10, font="helv"):
+        for x, text in pieces:
+            page.insert_text((x, y), text, fontsize=size, fontname=font)
+
+    page = doc.new_page()  # physical 0: the TOC
+    page.insert_text((72, 80), "Contents", fontsize=16, fontname="hebo")
+    frags(page, 120, [(72, "1"), (95, "Reading"), (500, "2")])
+    frags(page, 140, [(72, "2"), (95, "Logic and background"), (500, "3")])
+    frags(page, 160, [(72, "3"), (95, "Revision"), (500, "4")])
+    frags(page, 180, [(95, "3.1"), (120, "Propositional Logic . . . . . . ."), (500, "4")])
+    frags(page, 200, [(95, "3.2"), (120, "Predicate Logic . . . . . . . . ."), (500, "5")])
+
+    def body_page(headings):
+        page = doc.new_page()
+        for y, size, pieces in headings:
+            frags(page, y, pieces, size=size, font="hebo")
+        y = 400.0
+        for text, size, font, x in _body_rows():
+            page.insert_text((x, y), text, fontsize=size, fontname=font)
+            y += size * 1.8
+
+    body_page([(80, 14, [(72, "1"), (95, "Reading")])])                   # printed 2
+    body_page([(80, 14, [(72, "2"), (95, "Logic and background")])])      # printed 3
+    body_page([(80, 14, [(72, "3"), (95, "Revision")]),                   # printed 4
+               (300, 12, [(72, "3.1"), (100, "Propositional Logic")])])
+    body_page([(80, 12, [(72, "3.2"), (100, "Predicate Logic")])])        # printed 5
+    return _save(doc, tmp_path_factory, "fragmented.pdf")
+
+
+@pytest.fixture(scope="session")
 def no_text_pdf(tmp_path_factory):
     """Drawings only — simulates a scanned PDF with no text layer."""
     doc = fitz.open()
