@@ -153,6 +153,30 @@ def test_auto_mode_without_key_warns_and_continues(ghost_toc_pdf, monkeypatch, t
     assert len(fitz.open(str(out)).get_toc()) == 3  # heuristic outline kept
 
 
+def test_auto_mode_without_gemini_key_warns_and_continues(
+    ghost_toc_pdf, monkeypatch, tmp_path, capsys
+):
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    out = tmp_path / "out.pdf"
+    rc = cli.main([str(ghost_toc_pdf), "-o", str(out), "--model", "gemini"])
+    assert rc == 0
+    assert "without LLM" in capsys.readouterr().err
+    assert len(fitz.open(str(out)).get_toc()) == 3  # heuristic outline kept
+
+
+def test_llm_flag_with_gemini_but_no_key_is_pipeline_error(
+    ghost_toc_pdf, monkeypatch, tmp_path, capsys
+):
+    """Missing key surfaces as an LLM failure (rc 1), same as other providers."""
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    rc = cli.main([str(ghost_toc_pdf), "-o", str(tmp_path / "out.pdf"),
+                   "--llm", "--model", "gemini"])
+    assert rc == 1
+    assert "LLM verification failed" in capsys.readouterr().err
+
+
 def test_auto_mode_high_confidence_skips_llm(toc_pdf, monkeypatch, tmp_path):
     def boom(spec):
         raise AssertionError("LLM should not be called for a healthy outline")
