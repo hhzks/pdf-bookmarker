@@ -62,14 +62,57 @@ class AnthropicBackend:
         ]
 
 
-_BACKENDS: dict[str, type] = {"anthropic": AnthropicBackend}
+class GeminiBackend:
+    """Google Gemini backend using the google-genai SDK with structured output."""
+
+    def __init__(self, model: str = "gemini-3.5-flash"):
+        try:
+            from google import genai  # lazy import: shipped as the [gemini] extra
+        except ImportError as exc:
+            raise ImportError(
+                'google-genai is not installed; run pip install "pdf-bookmarker[gemini]"'
+            ) from exc
+
+        self._client = genai.Client()  # reads GEMINI_API_KEY / GOOGLE_API_KEY from env
+        self._model = model
+
+    def parse_outline(self, context: str) -> list[OutlineEntry]:
+        response = self._client.models.generate_content(
+            model=self._model,
+            contents=_PROMPT.format(context=context),
+            config={
+                "response_mime_type": "application/json",
+                "response_schema": _Outline,
+            },
+        )
+        outline = response.parsed
+        return [
+            OutlineEntry(title=item.title, level=item.level, printed_page=item.printed_page)
+            for item in outline.entries
+        ]
+
+
+_BACKENDS: dict[str, type] = {
+    "anthropic": AnthropicBackend,
+    "gemini": GeminiBackend,
+}
+
+# Env vars each provider's SDK reads its key from (first name used in warnings).
+ENV_KEYS: dict[str, tuple[str, ...]] = {
+    "anthropic": ("ANTHROPIC_API_KEY",),
+    "gemini": ("GEMINI_API_KEY", "GOOGLE_API_KEY"),
+}
+
+
+class UnknownProviderError(ValueError):
+    """The provider part of a "provider:model-id" spec is not registered."""
 
 
 def get_backend(spec: str) -> LLMBackend:
     """Resolve a "provider:model-id" spec (model part optional) to a backend."""
     provider, _, model = spec.partition(":")
     if provider not in _BACKENDS:
-        raise ValueError(
+        raise UnknownProviderError(
             f"Unknown LLM provider {provider!r}. Available: {', '.join(sorted(_BACKENDS))}"
         )
     backend_cls = _BACKENDS[provider]
