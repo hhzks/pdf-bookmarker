@@ -17,9 +17,10 @@ def _body_rows(n=4):
     return [(BODY, 10, "helv", 72) for _ in range(n)]
 
 
-def _save(doc, tmp_path_factory, name):
+def _save(doc, tmp_path_factory, name, **save_kwargs):
     path = tmp_path_factory.mktemp("pdfs") / name
-    doc.save(str(path))
+    doc.save(str(path), **save_kwargs)
+    doc.close()
     return path
 
 
@@ -110,7 +111,5 @@ def bookmarked_pdf(tmp_path_factory):
 def encrypted_pdf(tmp_path_factory):
     doc = fitz.open()
     _add_page(doc, [("Secret", 12, "helv", 72)])
-    path = tmp_path_factory.mktemp("pdfs") / "encrypted.pdf"
-    doc.save(str(path), encryption=fitz.PDF_ENCRYPT_AES_256,
-             user_pw="pw", owner_pw="pw")
-    return path
+    return _save(doc, tmp_path_factory, "encrypted.pdf",
+                 encryption=fitz.PDF_ENCRYPT_AES_256, user_pw="pw", owner_pw="pw")
