@@ -48,6 +48,8 @@ def main(argv: list[str] | None = None) -> int:
               file=sys.stderr)
         return 2
     except (pipeline.NoOutlineError, pipeline.LLMVerificationError) as exc:
+        for warning in getattr(exc, "warnings", []):
+            print(f"warning: {warning}", file=sys.stderr)
         print(f"error: {exc}", file=sys.stderr)
         return 1
     except (pipeline.PipelineError, llm.UnknownProviderError) as exc:
