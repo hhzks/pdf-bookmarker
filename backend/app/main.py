@@ -1,5 +1,6 @@
 """App factory: wiring, CORS, and the periodic cleanup loop."""
 import asyncio
+import logging
 import os
 from contextlib import asynccontextmanager
 
@@ -9,6 +10,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from .jobs import JobStore
 from .ratelimit import RateLimiter
 from .routes import router
+
+logger = logging.getLogger("pdf_bookmarker.web")
 
 CLEANUP_INTERVAL_SECONDS = 300
 
@@ -31,6 +34,10 @@ def create_app(
         task = asyncio.create_task(_cleanup_loop(app))
         yield
         task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
 
     app = FastAPI(title="pdf-bookmarker", lifespan=lifespan)
     app.state.jobs = JobStore(ttl_seconds=ttl_seconds)
@@ -42,6 +49,11 @@ def create_app(
             allow_methods=["*"],
             allow_headers=["*"],
         )
+    else:
+        logger.warning(
+            "ALLOWED_ORIGINS is not set; browsers on other origins will be "
+            "blocked by CORS"
+        )
     app.include_router(router)
     return app
 
@@ -49,8 +61,12 @@ def create_app(
 async def _cleanup_loop(app: FastAPI) -> None:
     while True:
         await asyncio.sleep(CLEANUP_INTERVAL_SECONDS)
-        app.state.jobs.cleanup_expired()
-        app.state.limiter.cleanup_expired()
+        try:
+            app.state.jobs.cleanup_expired()
+            app.state.limiter.cleanup_expired()
+        except Exception:
+            logger.exception("cleanup pass failed; will retry next interval")
 
 
+# uvicorn entry point (app.main:app); creates the worker pool at import time.
 app = create_app()

@@ -15,7 +15,9 @@ router = APIRouter(prefix="/api")
 def client_ip(request: Request) -> str:
     forwarded = request.headers.get("x-forwarded-for")
     if forwarded:
-        return forwarded.split(",")[0].strip()
+        # The last entry is appended by the trusted platform proxy (one hop
+        # on Render); everything to its left is client-controlled.
+        return forwarded.split(",")[-1].strip()
     return request.client.host if request.client else "unknown"
 
 
@@ -27,11 +29,11 @@ async def create_job(
     model: str | None = Form(None),
     api_key: str | None = Form(None),
 ):
-    if not request.app.state.limiter.allow(client_ip(request)):
-        raise HTTPException(429, "Rate limit exceeded — try again later.")
     if llm_mode not in VALID_MODES:
         raise HTTPException(400, "llm_mode must be auto, always or never.")
 
+    # Buffered fully in memory (capped at MAX_SIZE = 50 MB); an accepted
+    # tradeoff at free-tier traffic levels.
     data = bytearray()
     while chunk := await file.read(1024 * 1024):
         data.extend(chunk)
@@ -40,8 +42,10 @@ async def create_job(
     if not bytes(data[:5]) == b"%PDF-":
         raise HTTPException(400, "This file is not a PDF.")
 
+    if not request.app.state.limiter.allow(client_ip(request)):
+        raise HTTPException(429, "Rate limit exceeded — try again later.")
+
     store = request.app.state.jobs
-    store.cleanup_expired()
     job = store.submit(
         bytes(data),
         file.filename or "document.pdf",

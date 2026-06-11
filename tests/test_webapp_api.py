@@ -113,3 +113,33 @@ def test_cors_allows_configured_origin(fake_pipeline):
             "Access-Control-Request-Method": "POST",
         })
         assert res.headers.get("access-control-allow-origin") == "http://frontend.test"
+
+
+def test_rate_limit_keyed_on_proxy_appended_ip(fake_pipeline):
+    """The rightmost X-Forwarded-For entry (trusted proxy) is the key; a
+    spoofed leftmost value must not reset the quota."""
+    with TestClient(create_app(rate_limit_per_hour=1)) as client:
+        res = client.post(
+            "/api/jobs",
+            files={"file": ("a.pdf", PDF_BYTES, "application/pdf")},
+            headers={"x-forwarded-for": "spoof-1, 198.51.100.7"},
+        )
+        assert res.status_code == 202
+        res = client.post(
+            "/api/jobs",
+            files={"file": ("a.pdf", PDF_BYTES, "application/pdf")},
+            headers={"x-forwarded-for": "spoof-2, 198.51.100.7"},
+        )
+        assert res.status_code == 429
+
+
+def test_failed_validation_does_not_consume_quota(fake_pipeline):
+    with TestClient(create_app(rate_limit_per_hour=1)) as client:
+        res = client.post(
+            "/api/jobs", files={"file": ("x.txt", b"hello", "text/plain")}
+        )
+        assert res.status_code == 400
+        res = client.post(
+            "/api/jobs", files={"file": ("a.pdf", PDF_BYTES, "application/pdf")}
+        )
+        assert res.status_code == 202
