@@ -12,9 +12,11 @@ temporary and deleted after one hour.
 
 ## Decisions made during brainstorming
 
-- **Hosting:** public deployment on a free platform. Primary target:
-  Hugging Face Spaces (free Docker hosting, no card, no sleep). The image
-  must also run anywhere generic (`$PORT` env var).
+- **Hosting:** public deployment on free platforms, with the frontend and
+  backend hosted separately. Frontend: Vercel (free static hosting; Netlify
+  or Cloudflare Pages work identically). Backend: Render free tier as a
+  Docker web service (Fly.io or Railway are drop-in alternatives). The
+  backend image must run anywhere generic (`$PORT` env var).
 - **LLM verification:** same three modes as the CLI — `auto` (default),
   `always`, `never` — selectable in the UI. Uses the server-side API key by
   default; the user may optionally supply their own key, used only for that
@@ -23,12 +25,14 @@ temporary and deleted after one hour.
 - **Processing model:** async jobs with in-process workers (no Redis/Celery),
   job-ID + polling, to survive slow LLM calls without gateway timeouts.
 
-## Security note (pre-existing issue)
+## Security note (resolved)
 
-`pdf_bookmarker/llm.py` currently hardcodes a real Google API key in
-`GeminiBackend.__init__`. This design removes it (keys come from an explicit
-parameter or env vars), but the key is in git history and must be **revoked
-by the owner in Google AI Studio**.
+A real Google API key was briefly hardcoded in `GeminiBackend.__init__` in
+the local working copy. It was never committed: no commit, dangling object,
+or remote ref contains it (verified with `git log -S`, `git grep` over all
+revs, and a dangling-blob check), and it has been removed from the working
+file. Rotating the key remains a sensible precaution. The design keeps keys
+out of source permanently (explicit parameter or env vars only).
 
 ## Architecture
 
@@ -38,13 +42,13 @@ repo/
     pipeline.py        # NEW: shared processing pipeline
     cli.py             # becomes a thin wrapper over pipeline.py
     llm.py             # backends gain api_key parameter; hardcoded key removed
-  backend/             # NEW: FastAPI app
+  backend/             # NEW: FastAPI app (deployed to Render)
     app/
-      main.py          # app factory, static file serving
+      main.py          # app factory, CORS config
       jobs.py          # job store, worker pool, cleanup task
       routes.py        # API endpoints
-  frontend/            # NEW: React + Vite single page
-  Dockerfile           # multi-stage: node build -> python runtime
+    Dockerfile         # python runtime for the API only
+  frontend/            # NEW: React + Vite single page (deployed to Vercel)
 ```
 
 ### 1. Pipeline extraction (`pdf_bookmarker/pipeline.py`)
@@ -85,13 +89,15 @@ unchanged. LLM backends (`AnthropicBackend`, `GeminiBackend`) accept
   holding `input.pdf` and `output.pdf`.
 - **Cleanup:** periodic task deletes jobs (state + files) older than 1 hour.
 - **Rate limiting:** per-IP, 10 job submissions per hour, to protect the
-  server-side LLM key. Returns 429.
+  server-side LLM key. Returns 429. Client IP is taken from
+  `X-Forwarded-For` (the backend sits behind the platform's proxy).
 - **API keys:** user-supplied keys live only in the in-memory job record for
   the duration of the job, are passed to the backend constructor, and are
   excluded from all logging.
 - **Error mapping:** typed pipeline exceptions map to friendly messages
   (e.g. "This PDF appears to be scanned — it has no text layer").
-- Serves the built frontend from `/` as static files (same origin, no CORS).
+- **CORS:** the API allows only the frontend origin, configured via an
+  `ALLOWED_ORIGINS` env var (comma-separated, to cover preview deploys).
 
 ### 3. Frontend (React + Vite, single page)
 
@@ -105,20 +111,26 @@ Options panel:
 - Collapsible "Use my own API key" text input (password-style field).
 
 Errors render as a friendly message card with a retry option. Polling
-interval ~1.5 s. The Vite build (`frontend/dist`) is copied into the backend
-image and served by FastAPI.
+interval ~1.5 s. The API base URL comes from `VITE_API_BASE_URL` at build
+time (empty in local dev, where Vite's dev-server proxy forwards `/api` to
+the local backend).
 
-### 4. Deployment
+### 4. Deployment (split hosting)
 
-Multi-stage `Dockerfile`:
-1. `node` stage: `npm ci && npm run build` in `frontend/`.
-2. `python:3.12-slim` stage: install `pdf_bookmarker` + backend deps
-   (incl. `[gemini]` extra), copy frontend build, run `uvicorn` on `$PORT`
-   (default 7860 to match Hugging Face Spaces).
+**Backend — Render free tier**, Docker web service:
+- `backend/Dockerfile`: `python:3.12-slim`, installs `pdf_bookmarker` +
+  backend deps (incl. `[gemini]` extra), runs `uvicorn` on `$PORT`.
+- Env vars set in the platform dashboard: `ANTHROPIC_API_KEY` /
+  `GEMINI_API_KEY` (server LLM keys), `ALLOWED_ORIGINS` (frontend URL).
+- Render's free tier sleeps after ~15 min idle (first request after sleep
+  takes ~50 s) and restarts lose in-memory jobs and temp files. Acceptable:
+  files are temporary by design, and the frontend shows expired jobs as
+  "session expired — please re-upload".
+- Fly.io and Railway run the same image unchanged.
 
-Server LLM key supplied via platform secret (`ANTHROPIC_API_KEY` /
-`GEMINI_API_KEY`). No other persistent state — fully ephemeral filesystem is
-fine because files are temporary by design.
+**Frontend — Vercel** (Netlify / Cloudflare Pages equivalent):
+- Git-integration build of `frontend/` (`npm run build`), with
+  `VITE_API_BASE_URL` pointing at the Render URL.
 
 ### 5. Testing
 
