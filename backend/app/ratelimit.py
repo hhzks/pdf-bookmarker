@@ -22,3 +22,14 @@ class RateLimiter:
                 return False
             hits.append(now)
             return True
+
+    def cleanup_expired(self, now: float | None = None) -> None:
+        """Drop keys whose hits have all aged out of the window."""
+        now = time.time() if now is None else now
+        with self._lock:
+            stale = [
+                key for key, hits in self._hits.items()
+                if not hits or now - hits[-1] > self._window
+            ]
+            for key in stale:
+                del self._hits[key]
