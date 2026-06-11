@@ -45,6 +45,7 @@ export default function App() {
   }, [phase, jobId]);
 
   function pickFile(f) {
+    if (!f) return;
     if (f && f.name.toLowerCase().endsWith(".pdf")) {
       setFile(f);
       setError(null);
@@ -99,9 +100,22 @@ export default function App() {
             onDrop={(e) => {
               e.preventDefault();
               setDragOver(false);
+              if (e.dataTransfer.files.length > 1) {
+                setError("Please drop a single PDF file.");
+                return;
+              }
               pickFile(e.dataTransfer.files[0]);
             }}
             onClick={() => inputRef.current.click()}
+            role="button"
+            tabIndex={0}
+            aria-label="Choose a PDF file"
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                inputRef.current.click();
+              }
+            }}
           >
             <input
               ref={inputRef}
@@ -182,6 +196,10 @@ export default function App() {
         <section className="card center">
           <p>Uploading {file?.name}…</p>
           <progress value={progress} max="1" />
+          <p className="note">
+            If this is the first upload in a while, the server may take up to a
+            minute to wake up.
+          </p>
         </section>
       )}
 

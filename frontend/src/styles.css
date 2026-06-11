@@ -47,6 +47,11 @@ h1 { margin-bottom: 4px; }
 }
 
 .dropzone.over { border-color: var(--accent); background: #fdf3f2; }
+
+.dropzone:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
 .dropzone .filename { color: var(--text); font-weight: 600; }
 
 .options { border: none; padding: 16px 0 0; margin: 0; }
