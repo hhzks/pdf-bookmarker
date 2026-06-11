@@ -105,6 +105,15 @@ def test_existing_bookmarks_require_force(bookmarked_pdf, tmp_path, capsys):
     assert toc and toc[0][1] != "Existing"
 
 
+def test_no_outline_in_auto_mode_prints_warning_and_error(plain_pdf, monkeypatch, tmp_path, capsys):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    rc = cli.main([str(plain_pdf), "-o", str(tmp_path / "out.pdf")])
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "without LLM" in err
+    assert "no outline could be detected" in err
+
+
 def test_unknown_provider_errors(toc_pdf, capsys):
     rc = cli.main([str(toc_pdf), "--llm", "--model", "bogus:x"])
     assert rc == 2

@@ -36,6 +36,10 @@ class ExistingBookmarksError(PipelineError):
 class NoOutlineError(PipelineError):
     """No outline could be detected."""
 
+    def __init__(self, message: str, warnings: list[str] | None = None):
+        super().__init__(message)
+        self.warnings = warnings or []
+
 
 class LLMVerificationError(PipelineError):
     """The LLM pass failed and llm_mode was "always"."""
@@ -107,7 +111,7 @@ def process_pdf(
                 warnings.append(f"LLM call failed ({exc}); using heuristic outline")
 
         if not entries:
-            raise NoOutlineError("no outline could be detected")
+            raise NoOutlineError("no outline could be detected", warnings)
 
         count = 0
         if output_path is not None:

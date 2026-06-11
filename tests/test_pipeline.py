@@ -56,6 +56,13 @@ def test_no_outline_raises(plain_pdf, tmp_path):
         pipeline.process_pdf(plain_pdf, tmp_path / "o.pdf", llm_mode="never")
 
 
+def test_no_outline_error_carries_warnings(plain_pdf, tmp_path, monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    with pytest.raises(pipeline.NoOutlineError) as excinfo:
+        pipeline.process_pdf(plain_pdf, tmp_path / "o.pdf", llm_mode="auto")
+    assert any("without LLM" in w for w in excinfo.value.warnings)
+
+
 def test_existing_bookmarks_replaced_by_default(bookmarked_pdf, tmp_path):
     out = tmp_path / "out.pdf"
     result = pipeline.process_pdf(bookmarked_pdf, out, llm_mode="never")
