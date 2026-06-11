@@ -86,20 +86,37 @@ class JobStore:
             return self._jobs.get(job_id)
 
     def cleanup_expired(self, now: float | None = None) -> None:
-        """Drop done/failed jobs older than the TTL and delete their files."""
+        """Drop expired jobs and delete their files.
+
+        done/failed jobs expire after the TTL. Jobs that never reached a
+        terminal state (a hung worker, or queued forever under a full pool)
+        are reclaimed after twice the TTL so abandoned temp dirs cannot
+        accumulate. If a directory cannot be removed (Windows file locks,
+        e.g. a download still streaming), the job is kept so the next pass
+        retries; a download that starts just before expiry may still fail
+        mid-stream — accepted, the file is already an hour stale by then.
+        """
         now = time.time() if now is None else now
         with self._lock:
             expired = [
                 job for job in self._jobs.values()
-                if job.status in ("done", "failed") and now - job.created_at > self._ttl
+                if (job.status in ("done", "failed")
+                    and now - job.created_at > self._ttl)
+                or now - job.created_at > 2 * self._ttl
             ]
             for job in expired:
                 del self._jobs[job.id]
         for job in expired:
             shutil.rmtree(job.dir, ignore_errors=True)
+            if job.dir.exists():  # locked on Windows; retry next pass
+                with self._lock:
+                    self._jobs[job.id] = job
 
     def _run(self, job: Job, llm_mode: str, model_spec: str,
              api_key: str | None) -> None:
+        # Job fields are published lockless: this worker thread writes them,
+        # request threads poll them. CPython's GIL makes the attribute stores
+        # atomic and visible; the terminal status is always written last.
         job.status = "processing"
         try:
             result = process_pdf(

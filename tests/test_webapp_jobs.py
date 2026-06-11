@@ -1,3 +1,4 @@
+import os
 import time
 
 import pytest
@@ -85,3 +86,31 @@ def test_cleanup_keeps_fresh_jobs(fake_pipeline):
     store.cleanup_expired(now=time.time() + 60)
     assert store.get(job.id) is job
     assert job.dir.exists()
+
+
+def test_cleanup_reclaims_abandoned_jobs_after_double_ttl(fake_pipeline):
+    store = JobStore(ttl_seconds=3600)
+    job = store.submit(b"%PDF-1.4", "a.pdf", llm_mode="auto",
+                       model_spec="anthropic", api_key=None)
+    wait_for(job)
+    job.status = "processing"  # simulate a worker that never finished
+    store.cleanup_expired(now=time.time() + 3601)
+    assert store.get(job.id) is job  # within 2x TTL: kept
+    store.cleanup_expired(now=time.time() + 7201)
+    assert store.get(job.id) is None
+    assert not job.dir.exists()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="relies on Windows file locking")
+def test_cleanup_retries_when_dir_is_locked(fake_pipeline):
+    store = JobStore(ttl_seconds=3600)
+    job = store.submit(b"%PDF-1.4", "a.pdf", llm_mode="auto",
+                       model_spec="anthropic", api_key=None)
+    wait_for(job)
+    with open(job.output_path, "rb"):
+        store.cleanup_expired(now=time.time() + 3601)
+        assert store.get(job.id) is job  # locked: kept for retry
+        assert job.dir.exists()
+    store.cleanup_expired(now=time.time() + 3601)
+    assert store.get(job.id) is None
+    assert not job.dir.exists()
