@@ -116,7 +116,7 @@ def test_llm_flag_uses_backend(headings_pdf, monkeypatch, tmp_path):
         def parse_outline(self, context):
             return [OutlineEntry("Chapter 1 Getting Started", 1)]
 
-    monkeypatch.setattr(cli.llm, "get_backend", lambda spec: FakeBackend())
+    monkeypatch.setattr(cli.llm, "get_backend", lambda spec, api_key=None: FakeBackend())
     out = tmp_path / "out.pdf"
     rc = cli.main([str(headings_pdf), "--llm", "-o", str(out)])
     assert rc == 0
@@ -136,7 +136,7 @@ def test_auto_mode_low_confidence_calls_llm(ghost_toc_pdf, monkeypatch, tmp_path
             ]
 
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
-    monkeypatch.setattr(cli.llm, "get_backend", lambda spec: FakeBackend())
+    monkeypatch.setattr(cli.llm, "get_backend", lambda spec, api_key=None: FakeBackend())
     out = tmp_path / "out.pdf"
     rc = cli.main([str(ghost_toc_pdf), "-o", str(out)])
     assert rc == 0
@@ -178,7 +178,7 @@ def test_llm_flag_with_gemini_but_no_key_is_pipeline_error(
 
 
 def test_auto_mode_high_confidence_skips_llm(toc_pdf, monkeypatch, tmp_path):
-    def boom(spec):
+    def boom(spec, api_key=None):
         raise AssertionError("LLM should not be called for a healthy outline")
 
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
@@ -193,7 +193,7 @@ def test_llm_failure_in_auto_mode_falls_back(ghost_toc_pdf, monkeypatch, tmp_pat
             raise RuntimeError("api down")
 
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
-    monkeypatch.setattr(cli.llm, "get_backend", lambda spec: FailingBackend())
+    monkeypatch.setattr(cli.llm, "get_backend", lambda spec, api_key=None: FailingBackend())
     out = tmp_path / "out.pdf"
     rc = cli.main([str(ghost_toc_pdf), "-o", str(out)])
     assert rc == 0
@@ -206,7 +206,7 @@ def test_llm_failure_with_llm_flag_errors(ghost_toc_pdf, monkeypatch, tmp_path, 
         def parse_outline(self, context):
             raise RuntimeError("api down")
 
-    monkeypatch.setattr(cli.llm, "get_backend", lambda spec: FailingBackend())
+    monkeypatch.setattr(cli.llm, "get_backend", lambda spec, api_key=None: FailingBackend())
     rc = cli.main([str(ghost_toc_pdf), "--llm", "-o", str(tmp_path / "out.pdf")])
     assert rc == 1
     assert "LLM verification failed" in capsys.readouterr().err
