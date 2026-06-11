@@ -149,3 +149,11 @@ def encrypted_pdf(tmp_path_factory):
     _add_page(doc, [("Secret", 12, "helv", 72)])
     return _save(doc, tmp_path_factory, "encrypted.pdf",
                  encryption=fitz.PDF_ENCRYPT_AES_256, user_pw="pw", owner_pw="pw")
+
+
+@pytest.fixture(scope="session")
+def plain_pdf(tmp_path_factory):
+    """Body text only — no TOC and no headings, so no outline is detectable."""
+    doc = fitz.open()
+    _add_page(doc, _body_rows(8))
+    return _save(doc, tmp_path_factory, "plain.pdf")
