@@ -58,9 +58,13 @@ and processed files are deleted after one hour.
 ### Run locally
 
     pip install -e ".[dev]"
-    cd backend && uvicorn app.main:app --port 8000
+    cd backend
+    uvicorn app.main:app --port 8000
 
-    cd frontend && npm install && npm run dev   # proxies /api to :8000
+    # in a second terminal
+    cd frontend
+    npm install
+    npm run dev   # proxies /api to :8000
 
 ### Deploy
 
