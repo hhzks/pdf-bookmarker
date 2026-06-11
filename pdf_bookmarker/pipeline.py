@@ -26,6 +26,9 @@ class NoTextLayerError(PipelineError):
     """The PDF has no extractable text (scanned image)."""
 
 
+_NO_TEXT_MESSAGE = "no extractable text layer (scanned PDF? OCR is not supported yet)"
+
+
 class ExistingBookmarksError(PipelineError):
     """The PDF already has an outline and replace_existing is False."""
 
@@ -68,47 +71,50 @@ def process_pdf(
         doc = fitz.open(input_path)
     except Exception as exc:
         raise InvalidPdfError(f"cannot open {input_path}: {exc}") from exc
-    if doc.needs_pass:
-        raise EncryptedPdfError("PDF is encrypted")
-    if doc.get_toc() and not replace_existing:
-        raise ExistingBookmarksError("PDF already has bookmarks")
-    if not extractor.has_text_layer(doc):
-        raise NoTextLayerError(
-            "no extractable text layer (scanned PDF? OCR is not supported yet)"
+    try:
+        if doc.needs_pass:
+            raise EncryptedPdfError("PDF is encrypted")
+        if doc.get_toc() and not replace_existing:
+            raise ExistingBookmarksError("PDF already has bookmarks")
+        if not extractor.has_text_layer(doc):
+            raise NoTextLayerError(_NO_TEXT_MESSAGE)
+
+        lines = extractor.extract_lines(doc)
+        if not lines:
+            raise NoTextLayerError(_NO_TEXT_MESSAGE)
+        entries, failures, used_toc, toc_pages = build_outline(lines, doc.page_count)
+
+        warnings: list[str] = []
+        used_llm = False
+        run_llm, warning = decide_llm(
+            llm_mode, api_key, entries, failures, used_toc, doc.page_count, model_spec
         )
+        if warning:
+            warnings.append(warning)
+        if run_llm:
+            try:
+                backend = llm.get_backend(model_spec, api_key=api_key)
+                llm_entries = backend.parse_outline(build_llm_context(lines, toc_pages))
+                entries, failures = locator.locate_entries(
+                    llm_entries, lines, skip_pages=set(toc_pages)
+                )
+                used_llm = True
+            except llm.UnknownProviderError:
+                raise
+            except Exception as exc:
+                if llm_mode == "always":
+                    raise LLMVerificationError(f"LLM verification failed: {exc}") from exc
+                warnings.append(f"LLM call failed ({exc}); using heuristic outline")
 
-    lines = extractor.extract_lines(doc)
-    entries, failures, used_toc, toc_pages = build_outline(lines, doc.page_count)
+        if not entries:
+            raise NoOutlineError("no outline could be detected")
 
-    warnings: list[str] = []
-    used_llm = False
-    run_llm, warning = decide_llm(
-        llm_mode, api_key, entries, failures, used_toc, doc.page_count, model_spec
-    )
-    if warning:
-        warnings.append(warning)
-    if run_llm:
-        try:
-            backend = llm.get_backend(model_spec, api_key=api_key)
-            llm_entries = backend.parse_outline(build_llm_context(lines, toc_pages))
-            entries, failures = locator.locate_entries(
-                llm_entries, lines, skip_pages=set(toc_pages)
-            )
-            used_llm = True
-        except llm.UnknownProviderError:
-            raise
-        except Exception as exc:
-            if llm_mode == "always":
-                raise LLMVerificationError(f"LLM verification failed: {exc}") from exc
-            warnings.append(f"LLM call failed ({exc}); using heuristic outline")
-
-    if not entries:
-        raise NoOutlineError("no outline could be detected")
-
-    count = 0
-    if output_path is not None:
-        count = writer.write_outline(doc, entries, str(output_path))
-    return PipelineResult(entries, count, used_llm, used_toc, warnings)
+        count = 0
+        if output_path is not None:
+            count = writer.write_outline(doc, entries, str(output_path))
+        return PipelineResult(entries, count, used_llm, used_toc, warnings)
+    finally:
+        doc.close()
 
 
 def build_outline(
