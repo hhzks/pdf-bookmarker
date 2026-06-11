@@ -1,3 +1,5 @@
+import shutil
+
 import fitz
 import pytest
 
@@ -43,6 +45,12 @@ def test_no_text_layer_raises(no_text_pdf, tmp_path):
         pipeline.process_pdf(no_text_pdf, tmp_path / "o.pdf", llm_mode="never")
 
 
+def test_empty_extraction_raises_no_text_layer(toc_pdf, tmp_path, monkeypatch):
+    monkeypatch.setattr(pipeline.extractor, "extract_lines", lambda doc: [])
+    with pytest.raises(pipeline.NoTextLayerError):
+        pipeline.process_pdf(toc_pdf, tmp_path / "o.pdf", llm_mode="never")
+
+
 def test_no_outline_raises(plain_pdf, tmp_path):
     with pytest.raises(pipeline.NoOutlineError):
         pipeline.process_pdf(plain_pdf, tmp_path / "o.pdf", llm_mode="never")
@@ -60,6 +68,23 @@ def test_existing_bookmarks_guard(bookmarked_pdf, tmp_path):
         pipeline.process_pdf(
             bookmarked_pdf, tmp_path / "o.pdf", llm_mode="never", replace_existing=False
         )
+
+
+def test_input_file_released_after_processing(toc_pdf, tmp_path):
+    src = tmp_path / "copy.pdf"
+    shutil.copy(toc_pdf, src)
+    pipeline.process_pdf(src, tmp_path / "out.pdf", llm_mode="never")
+    src.unlink()  # raises PermissionError on Windows if the handle leaked
+    assert not src.exists()
+
+
+def test_input_file_released_after_failure(encrypted_pdf, tmp_path):
+    src = tmp_path / "enc.pdf"
+    shutil.copy(encrypted_pdf, src)
+    with pytest.raises(pipeline.EncryptedPdfError):
+        pipeline.process_pdf(src, tmp_path / "out.pdf", llm_mode="never")
+    src.unlink()
+    assert not src.exists()
 
 
 def test_invalid_llm_mode_raises(toc_pdf, tmp_path):
@@ -120,8 +145,9 @@ def test_llm_failure_auto_falls_back(ghost_toc_pdf, tmp_path, monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     monkeypatch.setattr(pipeline.llm, "get_backend", lambda spec, api_key=None: FailingBackend())
     out = tmp_path / "o.pdf"
-    result = pipeline.process_pdf(ghost_toc_pdf, out, llm_mode="auto")
+    result = pipeline.process_pdf(ghost_toc_pdf, out, llm_mode="auto", api_key="secret-sentinel")
     assert any("LLM call failed" in w for w in result.warnings)
+    assert all("secret-sentinel" not in w for w in result.warnings)
     assert len(fitz.open(str(out)).get_toc()) == 3
 
 
@@ -131,8 +157,11 @@ def test_llm_failure_always_raises(ghost_toc_pdf, tmp_path, monkeypatch):
             raise RuntimeError("api down")
 
     monkeypatch.setattr(pipeline.llm, "get_backend", lambda spec, api_key=None: FailingBackend())
-    with pytest.raises(pipeline.LLMVerificationError, match="LLM verification failed"):
-        pipeline.process_pdf(ghost_toc_pdf, tmp_path / "o.pdf", llm_mode="always")
+    with pytest.raises(pipeline.LLMVerificationError, match="LLM verification failed") as excinfo:
+        pipeline.process_pdf(
+            ghost_toc_pdf, tmp_path / "o.pdf", llm_mode="always", api_key="secret-sentinel"
+        )
+    assert "secret-sentinel" not in str(excinfo.value)
 
 
 def test_unknown_provider_propagates(toc_pdf, tmp_path):
