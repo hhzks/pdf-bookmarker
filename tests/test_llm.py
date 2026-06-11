@@ -39,7 +39,8 @@ class FakeMessages:
 
 def _fake_anthropic(monkeypatch, captured):
     class FakeClient:
-        def __init__(self):
+        def __init__(self, api_key=None):
+            captured["client_api_key"] = api_key
             self.messages = FakeMessages(captured)
 
     monkeypatch.setattr("anthropic.Anthropic", FakeClient)
@@ -91,7 +92,8 @@ class FakeGeminiModels:
 
 def _fake_gemini(monkeypatch, captured):
     class FakeClient:
-        def __init__(self):
+        def __init__(self, api_key=None):
+            captured["client_api_key"] = api_key
             self.models = FakeGeminiModels(captured)
 
     monkeypatch.setattr("google.genai.Client", FakeClient)
@@ -154,3 +156,38 @@ def test_gemini_backend_live():
 )
 def test_is_low_confidence(detected, failures, used_toc, levels, page_count, expected):
     assert llm.is_low_confidence(detected, failures, used_toc, levels, page_count) is expected
+
+
+def test_anthropic_backend_passes_api_key(monkeypatch):
+    captured = {}
+    _fake_anthropic(monkeypatch, captured)
+    llm.AnthropicBackend(api_key="sk-user")
+    assert captured["client_api_key"] == "sk-user"
+
+
+def test_gemini_backend_passes_api_key(monkeypatch):
+    captured = {}
+    _fake_gemini(monkeypatch, captured)
+    llm.GeminiBackend(api_key="g-user")
+    assert captured["client_api_key"] == "g-user"
+
+
+def test_get_backend_forwards_api_key(monkeypatch):
+    captured = {}
+    _fake_anthropic(monkeypatch, captured)
+    llm.get_backend("anthropic:claude-opus-4-8", api_key="sk-user")
+    assert captured["client_api_key"] == "sk-user"
+
+
+def test_get_backend_forwards_api_key_without_model(monkeypatch):
+    captured = {}
+    _fake_gemini(monkeypatch, captured)
+    llm.get_backend("gemini", api_key="g-user")
+    assert captured["client_api_key"] == "g-user"
+
+
+def test_get_backend_api_key_defaults_to_none(monkeypatch):
+    captured = {}
+    _fake_anthropic(monkeypatch, captured)
+    llm.get_backend("anthropic")
+    assert captured["client_api_key"] is None

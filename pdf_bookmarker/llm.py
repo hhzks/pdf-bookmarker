@@ -41,10 +41,11 @@ section heading. Keep titles exactly as written (minus dot leaders and page numb
 class AnthropicBackend:
     """Default backend using the official Anthropic SDK with structured output."""
 
-    def __init__(self, model: str = "claude-opus-4-8"):
+    def __init__(self, model: str = "claude-opus-4-8", api_key: str | None = None):
         import anthropic  # lazy import so heuristics-only runs don't need a key
 
-        self._client = anthropic.Anthropic()  # reads ANTHROPIC_API_KEY from env
+        # api_key=None falls back to ANTHROPIC_API_KEY from the environment.
+        self._client = anthropic.Anthropic(api_key=api_key)
         self._model = model
 
     def parse_outline(self, context: str) -> list[OutlineEntry]:
@@ -65,7 +66,7 @@ class AnthropicBackend:
 class GeminiBackend:
     """Google Gemini backend using the google-genai SDK with structured output."""
 
-    def __init__(self, model: str = "gemini-3.5-flash"):
+    def __init__(self, model: str = "gemini-3.5-flash", api_key: str | None = None):
         try:
             from google import genai  # lazy import: shipped as the [gemini] extra
         except ImportError as exc:
@@ -73,7 +74,8 @@ class GeminiBackend:
                 'google-genai is not installed; run pip install "pdf-bookmarker[gemini]"'
             ) from exc
 
-        self._client = genai.Client()  # reads GEMINI_API_KEY / GOOGLE_API_KEY from env
+        # api_key=None falls back to GEMINI_API_KEY / GOOGLE_API_KEY from the environment.
+        self._client = genai.Client(api_key=api_key)
         self._model = model
 
     def parse_outline(self, context: str) -> list[OutlineEntry]:
@@ -108,7 +110,7 @@ class UnknownProviderError(ValueError):
     """The provider part of a "provider:model-id" spec is not registered."""
 
 
-def get_backend(spec: str) -> LLMBackend:
+def get_backend(spec: str, api_key: str | None = None) -> LLMBackend:
     """Resolve a "provider:model-id" spec (model part optional) to a backend."""
     provider, _, model = spec.partition(":")
     if provider not in _BACKENDS:
@@ -116,7 +118,7 @@ def get_backend(spec: str) -> LLMBackend:
             f"Unknown LLM provider {provider!r}. Available: {', '.join(sorted(_BACKENDS))}"
         )
     backend_cls = _BACKENDS[provider]
-    return backend_cls(model) if model else backend_cls()
+    return backend_cls(model, api_key=api_key) if model else backend_cls(api_key=api_key)
 
 
 def is_low_confidence(
