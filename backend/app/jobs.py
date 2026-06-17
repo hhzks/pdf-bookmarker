@@ -36,14 +36,19 @@ _FRIENDLY: list[tuple[type[Exception], str]] = [
     (pipeline.EncryptedPdfError,
      "This PDF is password-protected. Remove the encryption and try again."),
     (pipeline.NoTextLayerError,
-     "This PDF appears to be scanned — it has no text layer, so headings "
-     "cannot be detected."),
+     "This PDF appears to be scanned and no text could be read from it, even "
+     "after OCR."),
     (pipeline.NoOutlineError,
      "No table of contents or headings could be detected in this PDF."),
     (pipeline.LLMVerificationError,
      "LLM verification failed. Check the API key and model, or set LLM mode "
      "to Auto or Never and retry."),
     (llm.UnknownProviderError, "Unknown LLM provider in the model selection."),
+    (pipeline.OcrPageLimitError,
+     "This scanned PDF is too long to process (the OCR page limit is set by "
+     "the server). Try a shorter document."),
+    (pipeline.OcrUnavailableError,
+     "This server can't process scanned PDFs right now."),
 ]
 
 
@@ -69,6 +74,8 @@ class JobStore:
         llm_mode: str,
         model_spec: str,
         api_key: str | None,
+        ocr_mode: str = "auto",
+        ocr_max_pages: int | None = None,
     ) -> Job:
         job_dir = Path(tempfile.mkdtemp(prefix="pdfjob-"))
         job = Job(id=uuid.uuid4().hex, original_name=original_name,
@@ -78,7 +85,9 @@ class JobStore:
             self._jobs[job.id] = job
         # The api_key travels only as a call argument: it is never stored on
         # the job record and never logged.
-        self._pool.submit(self._run, job, llm_mode, model_spec, api_key)
+        self._pool.submit(
+            self._run, job, llm_mode, model_spec, api_key, ocr_mode, ocr_max_pages
+        )
         return job
 
     def get(self, job_id: str) -> Job | None:
@@ -113,7 +122,8 @@ class JobStore:
                     self._jobs[job.id] = job
 
     def _run(self, job: Job, llm_mode: str, model_spec: str,
-             api_key: str | None) -> None:
+             api_key: str | None, ocr_mode: str = "auto",
+             ocr_max_pages: int | None = None) -> None:
         # Job fields are published lockless: this worker thread writes them,
         # request threads poll them. CPython's GIL makes the attribute stores
         # atomic and visible; the terminal status is always written last.
@@ -122,6 +132,7 @@ class JobStore:
             result = process_pdf(
                 job.input_path, job.output_path,
                 llm_mode=llm_mode, model_spec=model_spec, api_key=api_key,
+                ocr_mode=ocr_mode, ocr_max_pages=ocr_max_pages,
             )
         except Exception as exc:
             job.error = friendly_error(exc)

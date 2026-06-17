@@ -78,9 +78,28 @@ def test_default_output_path(toc_pdf, tmp_path, monkeypatch):
 
 
 def test_no_text_layer_errors(no_text_pdf, capsys):
-    rc = cli.main([str(no_text_pdf), "--no-llm"])
+    rc = cli.main([str(no_text_pdf), "--no-llm", "--ocr", "never"])
     assert rc == 2
     assert "OCR" in capsys.readouterr().err
+
+
+def test_ocr_flag_defaults_to_auto(toc_pdf, tmp_path):
+    # A born-digital PDF: --ocr defaults to auto and never touches OCR.
+    rc = cli.main([str(toc_pdf), "-o", str(tmp_path / "out.pdf"), "--no-llm"])
+    assert rc == 0
+
+
+def test_force_ocr_invokes_ocr(toc_pdf, tmp_path, monkeypatch):
+    from pdf_bookmarker.extractor import Line
+    called = []
+    monkeypatch.setattr(cli.pipeline.ocr, "available", lambda: True)
+    monkeypatch.setattr(
+        cli.pipeline.ocr, "extract_lines_via_ocr",
+        lambda doc: called.append(True) or [Line("Chapter 1 X", 0, 72, 100, 24, True)],
+    )
+    rc = cli.main([str(toc_pdf), "-o", str(tmp_path / "out.pdf"), "--no-llm", "--ocr", "force"])
+    assert rc == 0
+    assert called == [True]  # OCR ran despite the text layer
 
 
 def test_encrypted_pdf_errors(encrypted_pdf, capsys):

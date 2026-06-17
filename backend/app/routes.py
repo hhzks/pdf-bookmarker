@@ -12,6 +12,9 @@ VALID_MODES = {"auto", "always", "never"}
 # VERIFICATION_MODEL env var (e.g. "anthropic:claude-opus-4-8") — no code change.
 SERVER_MODEL_SPEC = os.environ.get("VERIFICATION_MODEL", "gemini:gemini-3.5-flash")
 
+# Bound OCR cost on the free tier: scanned PDFs longer than this are rejected.
+OCR_MAX_PAGES = int(os.environ.get("OCR_MAX_PAGES", "50"))
+
 router = APIRouter(prefix="/api")
 
 
@@ -59,6 +62,8 @@ async def create_job(
         llm_mode=llm_mode,
         model_spec=model_spec,
         api_key=api_key or None,
+        ocr_mode="auto",
+        ocr_max_pages=OCR_MAX_PAGES,
     )
     return {"job_id": job.id}
 

@@ -177,3 +177,39 @@ def test_failed_validation_does_not_consume_quota(fake_pipeline):
             "/api/jobs", files={"file": ("a.pdf", PDF_BYTES, "application/pdf")}
         )
         assert res.status_code == 202
+
+
+def test_ocr_options_reach_pipeline(client, fake_pipeline):
+    from app import routes
+    upload(client)
+    call = _first_call(fake_pipeline)  # helper added in the model-choice work
+    assert call["ocr_mode"] == "auto"
+    assert call["ocr_max_pages"] == routes.OCR_MAX_PAGES
+
+
+def test_page_limit_reports_friendly_error(monkeypatch):
+    from pdf_bookmarker.pipeline import OcrPageLimitError
+
+    def boom(input_path, output_path, **kwargs):
+        raise OcrPageLimitError("too long")
+
+    monkeypatch.setattr(jobs_module, "process_pdf", boom)
+    with TestClient(create_app(rate_limit_per_hour=1000)) as client:
+        job_id = upload(client).json()["job_id"]
+        body = poll_until_finished(client, job_id)
+        assert body["status"] == "failed"
+        assert "too long" in body["error"].lower()
+
+
+def test_ocr_unavailable_reports_friendly_error(monkeypatch):
+    from pdf_bookmarker.pipeline import OcrUnavailableError
+
+    def boom(input_path, output_path, **kwargs):
+        raise OcrUnavailableError("no tesseract")
+
+    monkeypatch.setattr(jobs_module, "process_pdf", boom)
+    with TestClient(create_app(rate_limit_per_hour=1000)) as client:
+        job_id = upload(client).json()["job_id"]
+        body = poll_until_finished(client, job_id)
+        assert body["status"] == "failed"
+        assert "scanned" in body["error"].lower()

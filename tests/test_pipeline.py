@@ -4,6 +4,7 @@ import fitz
 import pytest
 
 from pdf_bookmarker import pipeline
+from pdf_bookmarker.extractor import Line
 from pdf_bookmarker.models import OutlineEntry
 
 
@@ -42,7 +43,9 @@ def test_encrypted_raises(encrypted_pdf, tmp_path):
 
 def test_no_text_layer_raises(no_text_pdf, tmp_path):
     with pytest.raises(pipeline.NoTextLayerError, match="OCR"):
-        pipeline.process_pdf(no_text_pdf, tmp_path / "o.pdf", llm_mode="never")
+        pipeline.process_pdf(
+            no_text_pdf, tmp_path / "o.pdf", llm_mode="never", ocr_mode="never"
+        )
 
 
 def test_empty_extraction_raises_no_text_layer(toc_pdf, tmp_path, monkeypatch):
@@ -97,6 +100,96 @@ def test_input_file_released_after_failure(encrypted_pdf, tmp_path):
 def test_invalid_llm_mode_raises(toc_pdf, tmp_path):
     with pytest.raises(ValueError, match="llm_mode"):
         pipeline.process_pdf(toc_pdf, tmp_path / "o.pdf", llm_mode="sometimes")
+
+
+def _fixed_outline(monkeypatch):
+    """Bypass detection so OCR-decision tests are deterministic."""
+    monkeypatch.setattr(
+        pipeline, "build_outline",
+        lambda lines, page_count: ([OutlineEntry("Chapter 1", 1, page=0, y=100.0)], 0, False, []),
+    )
+
+
+def test_auto_ocr_runs_when_no_text_layer(no_text_pdf, tmp_path, monkeypatch):
+    called = []
+    monkeypatch.setattr(pipeline.ocr, "available", lambda: True)
+    monkeypatch.setattr(
+        pipeline.ocr, "extract_lines_via_ocr",
+        lambda doc: called.append(True) or [Line("Chapter 1", 0, 72, 100, 24, True)],
+    )
+    _fixed_outline(monkeypatch)
+    result = pipeline.process_pdf(no_text_pdf, tmp_path / "o.pdf", llm_mode="never")
+    assert called == [True]
+    assert result.used_ocr is True
+    assert result.bookmark_count == 1
+
+
+def test_auto_ocr_unavailable_raises(no_text_pdf, tmp_path, monkeypatch):
+    monkeypatch.setattr(pipeline.ocr, "available", lambda: False)
+    with pytest.raises(pipeline.OcrUnavailableError):
+        pipeline.process_pdf(no_text_pdf, tmp_path / "o.pdf", llm_mode="never")
+
+
+def test_never_ocr_no_text_raises(no_text_pdf, tmp_path):
+    with pytest.raises(pipeline.NoTextLayerError, match="OCR"):
+        pipeline.process_pdf(
+            no_text_pdf, tmp_path / "o.pdf", llm_mode="never", ocr_mode="never"
+        )
+
+
+def test_force_ocr_overrides_text_layer(toc_pdf, tmp_path, monkeypatch):
+    called = []
+    monkeypatch.setattr(pipeline.ocr, "available", lambda: True)
+    monkeypatch.setattr(
+        pipeline.ocr, "extract_lines_via_ocr",
+        lambda doc: called.append(True) or [Line("Chapter 1", 0, 72, 100, 24, True)],
+    )
+    _fixed_outline(monkeypatch)
+    result = pipeline.process_pdf(
+        toc_pdf, tmp_path / "o.pdf", llm_mode="never", ocr_mode="force"
+    )
+    assert called == [True]  # OCR ran even though toc_pdf has a text layer
+    assert result.used_ocr is True
+
+
+def test_force_ocr_over_text_layer_warns(toc_pdf, tmp_path, monkeypatch):
+    monkeypatch.setattr(pipeline.ocr, "available", lambda: True)
+    monkeypatch.setattr(
+        pipeline.ocr, "extract_lines_via_ocr",
+        lambda doc: [Line("Chapter 1", 0, 72, 100, 24, True)],
+    )
+    _fixed_outline(monkeypatch)
+    result = pipeline.process_pdf(
+        toc_pdf, tmp_path / "o.pdf", llm_mode="never", ocr_mode="force"
+    )
+    assert any("forced OCR" in w for w in result.warnings)
+
+
+def test_ocr_empty_result_raises_no_text(no_text_pdf, tmp_path, monkeypatch):
+    monkeypatch.setattr(pipeline.ocr, "available", lambda: True)
+    monkeypatch.setattr(pipeline.ocr, "extract_lines_via_ocr", lambda doc: [])
+    with pytest.raises(pipeline.NoTextLayerError, match="OCR"):
+        pipeline.process_pdf(no_text_pdf, tmp_path / "o.pdf", llm_mode="never")
+
+
+def test_ocr_page_cap_raises(no_text_pdf, tmp_path, monkeypatch):
+    monkeypatch.setattr(pipeline.ocr, "available", lambda: True)
+    with pytest.raises(pipeline.OcrPageLimitError):
+        pipeline.process_pdf(
+            no_text_pdf, tmp_path / "o.pdf", llm_mode="never", ocr_max_pages=0
+        )
+
+
+def test_invalid_ocr_mode_raises(toc_pdf, tmp_path):
+    with pytest.raises(ValueError, match="ocr_mode"):
+        pipeline.process_pdf(
+            toc_pdf, tmp_path / "o.pdf", llm_mode="never", ocr_mode="sometimes"
+        )
+
+
+def test_born_digital_pdf_does_not_use_ocr(toc_pdf, tmp_path):
+    result = pipeline.process_pdf(toc_pdf, tmp_path / "o.pdf", llm_mode="never")
+    assert result.used_ocr is False
 
 
 def test_api_key_passed_to_backend(ghost_toc_pdf, tmp_path, monkeypatch):
