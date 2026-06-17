@@ -63,10 +63,6 @@ Control OCR behavior with `--ocr`:
 On the web app, OCR runs in `auto` mode and scanned PDFs longer than
 `OCR_MAX_PAGES` (default 50) are rejected to bound processing cost.
 
-## Limitations
-
-- Encrypted PDFs are not supported.
-
 ## Development
 
     pip install -e ".[dev]"
@@ -74,9 +70,7 @@ On the web app, OCR runs in `auto` mode and scanned PDFs longer than
 
 ## Web app
 
-An ilovepdf-style web UI lives in `frontend/` (React + Vite, hosted on
-Vercel) with a FastAPI backend in `backend/` (hosted on Render). Uploaded
-and processed files are deleted after one hour.
+Web UI lives in `frontend/` (React + Vite) with a FastAPI backend in `backend/`. Uploaded and processed files are deleted after one hour. You can access the website [here](https://pdf-bookmarker.vercel.app/), or alternatively run it yourself.
 
 ### Run locally
 
@@ -88,27 +82,3 @@ and processed files are deleted after one hour.
     cd frontend
     npm install
     npm run dev   # proxies /api to :8000
-
-### Deploy
-
-**Backend (Render):** create a Blueprint from this repo (`render.yaml`) or a
-Docker web service with context `.` and Dockerfile `backend/Dockerfile`.
-Set environment variables:
-
-- `ALLOWED_ORIGINS` — your frontend URL, e.g. `https://your-app.vercel.app`
-  (comma-separate several origins)
-- `ANTHROPIC_API_KEY` and/or `GEMINI_API_KEY` — server-side LLM keys
-  (optional; users can also bring their own key in the UI)
-- `VERIFICATION_MODEL` — optional. The `provider:model-id` used for LLM
-  verification when the user does not supply their own API key. Defaults to
-  `gemini:gemini-3.5-flash`. The matching provider key (e.g. `GEMINI_API_KEY`)
-  must be set.
-- `OCR_MAX_PAGES` — optional. Caps the page count of scanned PDFs eligible
-  for OCR. Defaults to `50`.
-
-The free tier sleeps after idle: the first request afterwards takes ~1 min,
-and in-memory jobs are lost on restart (files are temporary by design).
-
-**Frontend (Vercel):** import the repo, set the project root directory to
-`frontend/`, and set `VITE_API_BASE_URL` to the Render URL
-(e.g. `https://pdf-bookmarker-api.onrender.com`).
