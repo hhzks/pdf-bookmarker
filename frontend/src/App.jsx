@@ -132,14 +132,14 @@ export default function App() {
             )}
           </div>
 
-          <p className="note">Scanned PDFs are supported via OCR.</p>
+          <p className="note"></p>
 
           <fieldset className="options">
             <legend>LLM verification</legend>
             {[
-              ["auto", "Auto — only when the detected outline looks unreliable"],
-              ["always", "Always — verify every outline with the LLM"],
-              ["never", "Never — heuristics only"],
+              ["auto", "Auto: only when the detected outline looks unreliable"],
+              ["always", "Always: verify every outline with the LLM"],
+              ["never", "Never: heuristics only"],
             ].map(([value, label]) => (
               <label key={value} className="radio">
                 <input
@@ -155,9 +155,6 @@ export default function App() {
 
             {llmMode !== "never" && (
               <>
-                {!showKeyField && (
-                  <p className="note">Verification model is chosen by the server.</p>
-                )}
                 <button
                   type="button"
                   className="linklike"
@@ -221,8 +218,8 @@ export default function App() {
       {phase === "done" && (
         <section className="card center">
           <p className="success">
-            Done — {result.bookmark_count} bookmark
-            {result.bookmark_count === 1 ? "" : "s"} added.
+            Done ({result.bookmark_count} bookmark
+            {result.bookmark_count === 1 ? "" : "s"} added)
           </p>
           <a className="primary button" href={downloadUrl(jobId)}>
             Download PDF
