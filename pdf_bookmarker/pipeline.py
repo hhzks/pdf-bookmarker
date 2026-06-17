@@ -5,7 +5,7 @@ from pathlib import Path
 
 import fitz
 
-from . import extractor, heading_detector, llm, locator, toc_detector, writer
+from . import extractor, heading_detector, llm, locator, ocr, toc_detector, writer
 from .extractor import Line
 from .models import OutlineEntry
 
@@ -26,7 +26,15 @@ class NoTextLayerError(PipelineError):
     """The PDF has no extractable text (scanned image)."""
 
 
-_NO_TEXT_MESSAGE = "no extractable text layer (scanned PDF? OCR is not supported yet)"
+class OcrUnavailableError(PipelineError):
+    """OCR was needed or requested but the Tesseract binary is not available."""
+
+
+class OcrPageLimitError(PipelineError):
+    """The document has more pages than the configured OCR page cap."""
+
+
+_NO_TEXT_MESSAGE = "no extractable text layer (scanned PDF; enable OCR to read it)"
 
 
 class ExistingBookmarksError(PipelineError):
@@ -51,6 +59,7 @@ class PipelineResult:
     bookmark_count: int  # 0 when output_path is None (dry run)
     used_llm: bool
     used_toc: bool
+    used_ocr: bool = False
     warnings: list[str] = field(default_factory=list)
 
 
@@ -62,6 +71,8 @@ def process_pdf(
     model_spec: str = llm.DEFAULT_MODEL_SPEC,
     api_key: str | None = None,
     replace_existing: bool = True,
+    ocr_mode: str = "auto",  # "auto" | "force" | "never"
+    ocr_max_pages: int | None = None,
 ) -> PipelineResult:
     """Detect an outline in input_path and write it to output_path.
 
@@ -70,6 +81,8 @@ def process_pdf(
     """
     if llm_mode not in ("auto", "always", "never"):
         raise ValueError(f"llm_mode must be auto, always or never, not {llm_mode!r}")
+    if ocr_mode not in ("auto", "force", "never"):
+        raise ValueError(f"ocr_mode must be auto, force or never, not {ocr_mode!r}")
 
     try:
         doc = fitz.open(input_path)
@@ -80,12 +93,28 @@ def process_pdf(
             raise EncryptedPdfError("PDF is encrypted")
         if doc.get_toc() and not replace_existing:
             raise ExistingBookmarksError("PDF already has bookmarks")
-        if not extractor.has_text_layer(doc):
-            raise NoTextLayerError(_NO_TEXT_MESSAGE)
-
-        lines = extractor.extract_lines(doc)
-        if not lines:
-            raise NoTextLayerError(_NO_TEXT_MESSAGE)
+        has_text = extractor.has_text_layer(doc)
+        use_ocr = ocr_mode == "force" or (ocr_mode == "auto" and not has_text)
+        if use_ocr:
+            if not ocr.available():
+                raise OcrUnavailableError(
+                    "OCR is required to read this PDF but Tesseract is not available"
+                )
+            if ocr_max_pages is not None and doc.page_count > ocr_max_pages:
+                raise OcrPageLimitError(
+                    f"document has {doc.page_count} pages; OCR limit is {ocr_max_pages}"
+                )
+            lines = ocr.extract_lines_via_ocr(doc)
+            if not lines:
+                raise NoTextLayerError("OCR found no readable text in this scanned PDF")
+            used_ocr = True
+        else:
+            if not has_text:
+                raise NoTextLayerError(_NO_TEXT_MESSAGE)
+            lines = extractor.extract_lines(doc)
+            if not lines:
+                raise NoTextLayerError(_NO_TEXT_MESSAGE)
+            used_ocr = False
         entries, failures, used_toc, toc_pages = build_outline(lines, doc.page_count)
 
         warnings: list[str] = []
@@ -116,7 +145,7 @@ def process_pdf(
         count = 0
         if output_path is not None:
             count = writer.write_outline(doc, entries, str(output_path))
-        return PipelineResult(entries, count, used_llm, used_toc, warnings)
+        return PipelineResult(entries, count, used_llm, used_toc, used_ocr, warnings)
     finally:
         doc.close()
 
