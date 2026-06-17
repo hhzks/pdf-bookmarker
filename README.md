@@ -40,12 +40,19 @@ register the class in `_BACKENDS`, and (optionally) list its key env vars in
 
 ### Scanned PDFs (OCR)
 
-Scanned PDFs (no text layer) are automatically OCR'd and bookmarked like any
-other PDF. The CLI needs the `tesseract` binary installed and on `PATH`:
+Scanned PDFs (no text layer) are automatically OCR'd and run through the same
+outline detection as born-digital PDFs. The CLI needs the `tesseract` binary
+installed and on `PATH`:
 
     apt install tesseract-ocr        # Debian/Ubuntu
     brew install tesseract           # macOS
     # or the Tesseract Windows installer
+
+OCR'd text loses the bold/exact-size cues that font-heuristic heading
+detection relies on, so outline quality on scans is generally lower than on
+born-digital PDFs. Pairing OCR with LLM verification (`--ocr` together with
+`--llm`, or auto mode with an API key set) is recommended for scanned
+documents.
 
 Control OCR behavior with `--ocr`:
 

@@ -95,6 +95,7 @@ def process_pdf(
             raise ExistingBookmarksError("PDF already has bookmarks")
         has_text = extractor.has_text_layer(doc)
         use_ocr = ocr_mode == "force" or (ocr_mode == "auto" and not has_text)
+        warnings: list[str] = []
         if use_ocr:
             if not ocr.available():
                 raise OcrUnavailableError(
@@ -104,6 +105,8 @@ def process_pdf(
                 raise OcrPageLimitError(
                     f"document has {doc.page_count} pages; OCR limit is {ocr_max_pages}"
                 )
+            if has_text:
+                warnings.append("forced OCR: the existing text layer was ignored")
             lines = ocr.extract_lines_via_ocr(doc)
             if not lines:
                 raise NoTextLayerError("OCR found no readable text in this scanned PDF")
@@ -117,7 +120,6 @@ def process_pdf(
             used_ocr = False
         entries, failures, used_toc, toc_pages = build_outline(lines, doc.page_count)
 
-        warnings: list[str] = []
         used_llm = False
         run_llm, warning = decide_llm(
             llm_mode, api_key, entries, failures, used_toc, doc.page_count, model_spec

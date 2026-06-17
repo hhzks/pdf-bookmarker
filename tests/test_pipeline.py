@@ -152,6 +152,26 @@ def test_force_ocr_overrides_text_layer(toc_pdf, tmp_path, monkeypatch):
     assert result.used_ocr is True
 
 
+def test_force_ocr_over_text_layer_warns(toc_pdf, tmp_path, monkeypatch):
+    monkeypatch.setattr(pipeline.ocr, "available", lambda: True)
+    monkeypatch.setattr(
+        pipeline.ocr, "extract_lines_via_ocr",
+        lambda doc: [Line("Chapter 1", 0, 72, 100, 24, True)],
+    )
+    _fixed_outline(monkeypatch)
+    result = pipeline.process_pdf(
+        toc_pdf, tmp_path / "o.pdf", llm_mode="never", ocr_mode="force"
+    )
+    assert any("forced OCR" in w for w in result.warnings)
+
+
+def test_ocr_empty_result_raises_no_text(no_text_pdf, tmp_path, monkeypatch):
+    monkeypatch.setattr(pipeline.ocr, "available", lambda: True)
+    monkeypatch.setattr(pipeline.ocr, "extract_lines_via_ocr", lambda doc: [])
+    with pytest.raises(pipeline.NoTextLayerError, match="OCR"):
+        pipeline.process_pdf(no_text_pdf, tmp_path / "o.pdf", llm_mode="never")
+
+
 def test_ocr_page_cap_raises(no_text_pdf, tmp_path, monkeypatch):
     monkeypatch.setattr(pipeline.ocr, "available", lambda: True)
     with pytest.raises(pipeline.OcrPageLimitError):

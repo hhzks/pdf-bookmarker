@@ -29,3 +29,18 @@ def test_extract_lines_via_ocr_recovers_text(scanned_text_pdf):
     joined = " ".join(line.text for line in lines).lower()
     assert "introduction" in joined
     assert "methods" in joined
+
+
+def test_effective_dpi_uses_full_dpi_for_normal_page():
+    doc = fitz.open()
+    doc.new_page()  # A4 ≈ 595x842 pt, well under the pixel budget at 300 DPI
+    assert ocr._effective_dpi(doc[0]) == ocr.DPI
+    doc.close()
+
+
+def test_effective_dpi_clamps_oversized_page():
+    doc = fitz.open()
+    doc.new_page(width=5000, height=5000)  # ~69x69 inch: 300 DPI would be huge
+    dpi = ocr._effective_dpi(doc[0])
+    assert 72 <= dpi < ocr.DPI
+    doc.close()
