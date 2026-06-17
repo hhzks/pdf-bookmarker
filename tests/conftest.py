@@ -140,6 +140,25 @@ def no_text_pdf(tmp_path_factory):
 
 
 @pytest.fixture(scope="session")
+def scanned_text_pdf(tmp_path_factory):
+    """Real headings rendered, then rasterized to an image-only page.
+
+    The result has NO text layer (has_text_layer is False) but is visually
+    legible, so OCR can recover the text.
+    """
+    src = fitz.open()
+    page = src.new_page()
+    page.insert_text((72, 120), "Chapter 1 Introduction", fontsize=26, fontname="hebo")
+    page.insert_text((72, 220), "Chapter 2 Methods", fontsize=26, fontname="hebo")
+    pix = page.get_pixmap(dpi=150)
+    src.close()
+    out = fitz.open()
+    img_page = out.new_page()
+    img_page.insert_image(img_page.rect, pixmap=pix)
+    return _save(out, tmp_path_factory, "scanned.pdf")
+
+
+@pytest.fixture(scope="session")
 def bookmarked_pdf(tmp_path_factory):
     """Already has an outline — used for --force behavior."""
     doc = fitz.open()
