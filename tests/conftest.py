@@ -1,5 +1,10 @@
+import sys
+from pathlib import Path
+
 import fitz
 import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "backend"))
 
 BODY = "Lorem ipsum dolor sit amet, consectetur adipiscing elit."
 
@@ -149,3 +154,30 @@ def encrypted_pdf(tmp_path_factory):
     _add_page(doc, [("Secret", 12, "helv", 72)])
     return _save(doc, tmp_path_factory, "encrypted.pdf",
                  encryption=fitz.PDF_ENCRYPT_AES_256, user_pw="pw", owner_pw="pw")
+
+
+@pytest.fixture(scope="session")
+def plain_pdf(tmp_path_factory):
+    """Body text only — no TOC and no headings, so no outline is detectable."""
+    doc = fitz.open()
+    _add_page(doc, _body_rows(8))
+    return _save(doc, tmp_path_factory, "plain.pdf")
+
+
+@pytest.fixture
+def fake_pipeline(monkeypatch):
+    """Replace the web worker's process_pdf with a fast fake; returns the call list."""
+    from pdf_bookmarker.pipeline import PipelineResult
+    from app import jobs as jobs_module
+
+    calls = []
+
+    def fake(input_path, output_path, **kwargs):
+        calls.append({"input": Path(input_path), "output": Path(output_path), **kwargs})
+        Path(output_path).write_bytes(b"%PDF-1.4 fake output")
+        return PipelineResult(
+            entries=[], bookmark_count=4, used_llm=False, used_toc=True
+        )
+
+    monkeypatch.setattr(jobs_module, "process_pdf", fake)
+    return calls

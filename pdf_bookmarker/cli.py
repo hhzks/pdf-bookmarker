@@ -1,13 +1,9 @@
-"""Command-line entry point and pipeline orchestration."""
+"""Command-line entry point — argument parsing around pipeline.process_pdf."""
 import argparse
-import os
 import sys
 from pathlib import Path
 
-import fitz
-
-from . import extractor, heading_detector, llm, locator, toc_detector, writer
-from .extractor import Line
+from . import llm, pipeline
 from .models import OutlineEntry
 
 
@@ -34,117 +30,39 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    llm_mode = "always" if args.llm else ("never" if args.no_llm else "auto")
+    out_path = None if args.dry_run else (
+        args.output or args.input.with_suffix(".bookmarked.pdf")
+    )
 
     try:
-        doc = fitz.open(args.input)
-    except Exception as exc:
-        print(f"error: cannot open {args.input}: {exc}", file=sys.stderr)
-        return 2
-    if doc.needs_pass:
-        print("error: PDF is encrypted", file=sys.stderr)
-        return 2
-    if doc.get_toc() and not args.force:
+        result = pipeline.process_pdf(
+            args.input,
+            out_path,
+            llm_mode=llm_mode,
+            model_spec=args.model,
+            replace_existing=args.force,
+        )
+    except pipeline.ExistingBookmarksError:
         print("error: PDF already has bookmarks; use --force to replace them",
               file=sys.stderr)
         return 2
-    if not extractor.has_text_layer(doc):
-        print("error: no extractable text layer (scanned PDF? OCR is not supported yet)",
-              file=sys.stderr)
+    except (pipeline.NoOutlineError, pipeline.LLMVerificationError) as exc:
+        for warning in getattr(exc, "warnings", []):
+            print(f"warning: {warning}", file=sys.stderr)
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    except (pipeline.PipelineError, llm.UnknownProviderError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
         return 2
 
-    lines = extractor.extract_lines(doc)
-    entries, failures, used_toc, toc_pages = build_outline(lines, doc.page_count)
-
-    if decide_llm(args, entries, failures, used_toc, doc.page_count):
-        try:
-            backend = llm.get_backend(args.model)
-            context = build_llm_context(lines, toc_pages)
-            llm_entries = backend.parse_outline(context)
-            entries, failures = locator.locate_entries(
-                llm_entries, lines, skip_pages=set(toc_pages)
-            )
-        except llm.UnknownProviderError as exc:
-            print(f"error: {exc}", file=sys.stderr)
-            return 2
-        except Exception as exc:
-            if args.llm:
-                print(f"error: LLM verification failed: {exc}", file=sys.stderr)
-                return 1
-            print(f"warning: LLM call failed ({exc}); using heuristic outline",
-                  file=sys.stderr)
-
-    if not entries:
-        print("error: no outline could be detected", file=sys.stderr)
-        return 1
-
+    for warning in result.warnings:
+        print(f"warning: {warning}", file=sys.stderr)
     if args.dry_run:
-        print_outline(entries)
+        print_outline(result.entries)
         return 0
-
-    out_path = args.output or args.input.with_suffix(".bookmarked.pdf")
-    count = writer.write_outline(doc, entries, str(out_path))
-    print(f"wrote {count} bookmarks to {out_path}")
+    print(f"wrote {result.bookmark_count} bookmarks to {out_path}")
     return 0
-
-
-def build_outline(
-    lines: list[Line], page_count: int
-) -> tuple[list[OutlineEntry], int, bool, list[int]]:
-    """Run TOC detection with heading-detection fallback.
-
-    Returns (entries, location_failures, used_toc, toc_pages).
-    """
-    toc_pages = toc_detector.find_toc_pages(lines, page_count)
-    entries = toc_detector.parse_toc(lines, toc_pages) if toc_pages else []
-    if entries:
-        located, failures = locator.locate_entries(
-            entries, lines, skip_pages=set(toc_pages)
-        )
-        return located, failures, True, toc_pages
-    # Fallback: headings already carry page/y, no location step needed.
-    return heading_detector.detect_headings(lines), 0, False, toc_pages
-
-
-def decide_llm(
-    args: argparse.Namespace,
-    entries: list[OutlineEntry],
-    failures: int,
-    used_toc: bool,
-    page_count: int,
-) -> bool:
-    if args.no_llm:
-        return False
-    if args.llm:
-        return True
-    levels = [e.level for e in entries]
-    if not llm.is_low_confidence(len(entries), failures, used_toc, levels, page_count):
-        return False
-    # Pre-check only covers shipped providers (llm.ENV_KEYS); unknown ones
-    # surface missing-key errors via the auto-mode exception path.
-    key_names = llm.ENV_KEYS.get(args.model.partition(":")[0])
-    if key_names and not any(os.environ.get(name) for name in key_names):
-        print(f"warning: outline confidence is low but {key_names[0]} is not set; "
-              "continuing without LLM", file=sys.stderr)
-        return False
-    return True
-
-
-def build_llm_context(lines: list[Line], toc_pages: list[int]) -> str:
-    if toc_pages:
-        toc_page_set = set(toc_pages)
-        toc_text = "\n".join(l.text for l in lines if l.page in toc_page_set)
-        return f"Table of contents text:\n{toc_text}"
-    body = heading_detector.body_text_size(lines)
-    candidates = [
-        f"physical_page={l.page} size={l.size:.1f} bold={l.bold} text={l.text!r}"
-        for l in lines
-        if l.size >= body * 1.1 or l.bold
-    ]
-    return (
-        f"Candidate heading lines (body text size {body:.1f}; physical_page is "
-        f"0-based, not a printed page number):\n"
-        + "\n".join(candidates[:400])  # cap keeps the prompt within a sane token budget
-    )
 
 
 def print_outline(entries: list[OutlineEntry]) -> None:

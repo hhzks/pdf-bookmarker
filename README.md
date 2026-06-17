@@ -48,3 +48,38 @@ register the class in `_BACKENDS`, and (optionally) list its key env vars in
 
     pip install -e ".[dev]"
     python -m pytest
+
+## Web app
+
+An ilovepdf-style web UI lives in `frontend/` (React + Vite, hosted on
+Vercel) with a FastAPI backend in `backend/` (hosted on Render). Uploaded
+and processed files are deleted after one hour.
+
+### Run locally
+
+    pip install -e ".[dev]"
+    cd backend
+    uvicorn app.main:app --port 8000
+
+    # in a second terminal
+    cd frontend
+    npm install
+    npm run dev   # proxies /api to :8000
+
+### Deploy
+
+**Backend (Render):** create a Blueprint from this repo (`render.yaml`) or a
+Docker web service with context `.` and Dockerfile `backend/Dockerfile`.
+Set environment variables:
+
+- `ALLOWED_ORIGINS` — your frontend URL, e.g. `https://your-app.vercel.app`
+  (comma-separate several origins)
+- `ANTHROPIC_API_KEY` and/or `GEMINI_API_KEY` — server-side LLM keys
+  (optional; users can also bring their own key in the UI)
+
+The free tier sleeps after idle: the first request afterwards takes ~1 min,
+and in-memory jobs are lost on restart (files are temporary by design).
+
+**Frontend (Vercel):** import the repo, set the project root directory to
+`frontend/`, and set `VITE_API_BASE_URL` to the Render URL
+(e.g. `https://pdf-bookmarker-api.onrender.com`).
