@@ -47,25 +47,37 @@ def extract_lines(doc: fitz.Document) -> list[Line]:
     """
     lines: list[Line] = []
     for page_index, page in enumerate(doc):
-        fragments: list[_Fragment] = []
-        for block in page.get_text("dict")["blocks"]:
-            if block.get("type") != 0:  # 0 = text block
-                continue
-            for raw_line in block["lines"]:
-                fragment = _parse_fragment(raw_line)
-                if fragment:
-                    fragments.append(fragment)
-        for group in _baseline_groups(fragments):
-            lines.append(
-                Line(
-                    text=_join_fragments(group),
-                    page=page_index,
-                    x=group[0].x0,
-                    y=min(f.y for f in group),
-                    size=max(f.size for f in group),
-                    bold=any(f.bold for f in group),
-                )
+        blocks = page.get_text("dict")["blocks"]
+        lines.extend(lines_from_blocks(blocks, page_index))
+    return lines
+
+
+def lines_from_blocks(blocks: list[dict], page_index: int) -> list[Line]:
+    """Merge a page's text blocks (from get_text("dict")) into visual lines.
+
+    Shared by the born-digital path (extract_lines) and the OCR path
+    (ocr.extract_lines_via_ocr), which supplies OCR-derived blocks.
+    """
+    fragments: list[_Fragment] = []
+    for block in blocks:
+        if block.get("type") != 0:  # 0 = text block
+            continue
+        for raw_line in block["lines"]:
+            fragment = _parse_fragment(raw_line)
+            if fragment:
+                fragments.append(fragment)
+    lines: list[Line] = []
+    for group in _baseline_groups(fragments):
+        lines.append(
+            Line(
+                text=_join_fragments(group),
+                page=page_index,
+                x=group[0].x0,
+                y=min(f.y for f in group),
+                size=max(f.size for f in group),
+                bold=any(f.bold for f in group),
             )
+        )
     return lines
 
 
