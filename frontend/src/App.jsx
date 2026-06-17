@@ -153,7 +153,9 @@ export default function App() {
 
             {llmMode !== "never" && (
               <>
-                <p className="note">Verification model is chosen by the server.</p>
+                {!showKeyField && (
+                  <p className="note">Verification model is chosen by the server.</p>
+                )}
                 <button
                   type="button"
                   className="linklike"

@@ -125,12 +125,10 @@ def test_key_with_model_is_honored(client, fake_pipeline):
 def test_options_forwarded_to_pipeline(client, fake_pipeline):
     upload(client, llm_mode="always", model="gemini:gemini-3.5-flash",
            api_key="user-secret")
-    deadline = time.time() + 10
-    while not fake_pipeline and time.time() < deadline:
-        time.sleep(0.02)
-    assert fake_pipeline[0]["llm_mode"] == "always"
-    assert fake_pipeline[0]["model_spec"] == "gemini:gemini-3.5-flash"
-    assert fake_pipeline[0]["api_key"] == "user-secret"
+    call = _first_call(fake_pipeline)
+    assert call["llm_mode"] == "always"
+    assert call["model_spec"] == "gemini:gemini-3.5-flash"
+    assert call["api_key"] == "user-secret"
 
 
 def test_rate_limit_returns_429(fake_pipeline):
