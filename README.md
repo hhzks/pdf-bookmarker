@@ -76,6 +76,10 @@ Set environment variables:
   (comma-separate several origins)
 - `ANTHROPIC_API_KEY` and/or `GEMINI_API_KEY` — server-side LLM keys
   (optional; users can also bring their own key in the UI)
+- `VERIFICATION_MODEL` — optional. The `provider:model-id` used for LLM
+  verification when the user does not supply their own API key. Defaults to
+  `gemini:gemini-3.5-flash`. The matching provider key (e.g. `GEMINI_API_KEY`)
+  must be set.
 
 The free tier sleeps after idle: the first request afterwards takes ~1 min,
 and in-memory jobs are lost on restart (files are temporary by design).

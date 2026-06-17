@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { createJob, getJob, downloadUrl } from "./api";
 
 const MODELS = [
-  { value: "anthropic:claude-opus-4-8", label: "Claude Opus 4.8 (default)" },
+  { value: "anthropic:claude-opus-4-8", label: "Claude Opus 4.8" },
   { value: "anthropic:claude-sonnet-4-6", label: "Claude Sonnet 4.6" },
   { value: "gemini:gemini-3.5-flash", label: "Gemini 3.5 Flash" },
 ];
@@ -59,9 +59,10 @@ export default function App() {
     setProgress(0);
     setError(null);
     try {
+      const trimmedKey = apiKey.trim();
       const id = await createJob(
         file,
-        { llmMode, model, apiKey: apiKey.trim() },
+        { llmMode, model: trimmedKey ? model : undefined, apiKey: trimmedKey },
         setProgress
       );
       setJobId(id);
@@ -152,16 +153,9 @@ export default function App() {
 
             {llmMode !== "never" && (
               <>
-                <label className="field">
-                  Model
-                  <select value={model} onChange={(e) => setModel(e.target.value)}>
-                    {MODELS.map((m) => (
-                      <option key={m.value} value={m.value}>
-                        {m.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                {!showKeyField && (
+                  <p className="note">Verification model is chosen by the server.</p>
+                )}
                 <button
                   type="button"
                   className="linklike"
@@ -170,16 +164,28 @@ export default function App() {
                   {showKeyField ? "Use the server's API key" : "Use my own API key"}
                 </button>
                 {showKeyField && (
-                  <label className="field">
-                    API key (used only for this job, never stored)
-                    <input
-                      type="password"
-                      value={apiKey}
-                      autoComplete="off"
-                      placeholder="sk-… or AIza…"
-                      onChange={(e) => setApiKey(e.target.value)}
-                    />
-                  </label>
+                  <>
+                    <label className="field">
+                      Model
+                      <select value={model} onChange={(e) => setModel(e.target.value)}>
+                        {MODELS.map((m) => (
+                          <option key={m.value} value={m.value}>
+                            {m.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="field">
+                      API key (used only for this job, never stored)
+                      <input
+                        type="password"
+                        value={apiKey}
+                        autoComplete="off"
+                        placeholder="sk-… or AIza…"
+                        onChange={(e) => setApiKey(e.target.value)}
+                      />
+                    </label>
+                  </>
                 )}
               </>
             )}

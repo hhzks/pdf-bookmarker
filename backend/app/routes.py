@@ -1,13 +1,16 @@
 """HTTP endpoints for the job API."""
+import os
 from pathlib import Path
 
 from fastapi import APIRouter, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 
-from pdf_bookmarker.llm import DEFAULT_MODEL_SPEC
-
 MAX_SIZE = 50 * 1024 * 1024  # 50 MB
 VALID_MODES = {"auto", "always", "never"}
+
+# The server decides the verification model. Override at deploy time with the
+# VERIFICATION_MODEL env var (e.g. "anthropic:claude-opus-4-8") — no code change.
+SERVER_MODEL_SPEC = os.environ.get("VERIFICATION_MODEL", "gemini:gemini-3.5-flash")
 
 router = APIRouter(prefix="/api")
 
@@ -45,12 +48,16 @@ async def create_job(
     if not request.app.state.limiter.allow(client_ip(request)):
         raise HTTPException(429, "Rate limit exceeded — try again later.")
 
+    # The server decides the model; a caller may only override it when they
+    # bring their own API key. A model sent without a key is ignored.
+    model_spec = (model or SERVER_MODEL_SPEC) if api_key else SERVER_MODEL_SPEC
+
     store = request.app.state.jobs
     job = store.submit(
         bytes(data),
         file.filename or "document.pdf",
         llm_mode=llm_mode,
-        model_spec=model or DEFAULT_MODEL_SPEC,
+        model_spec=model_spec,
         api_key=api_key or None,
     )
     return {"job_id": job.id}
