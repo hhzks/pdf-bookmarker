@@ -12,3 +12,5 @@ services:
         sync: false
       - key: GEMINI_API_KEY
         sync: false
+      - key: VERIFICATION_MODEL
+        sync: false   # optional; defaults to gemini:gemini-3.5-flash
