@@ -38,10 +38,26 @@ The LLM layer is provider-agnostic: implement `pdf_bookmarker.llm.LLMBackend`,
 register the class in `_BACKENDS`, and (optionally) list its key env vars in
 `ENV_KEYS` to add another provider.
 
+### Scanned PDFs (OCR)
+
+Scanned PDFs (no text layer) are automatically OCR'd and bookmarked like any
+other PDF. The CLI needs the `tesseract` binary installed and on `PATH`:
+
+    apt install tesseract-ocr        # Debian/Ubuntu
+    brew install tesseract           # macOS
+    # or the Tesseract Windows installer
+
+Control OCR behavior with `--ocr`:
+
+    pdf-bookmarker scanned.pdf --ocr auto    # OCR only if there's no text layer (default)
+    pdf-bookmarker scanned.pdf --ocr force   # always OCR, even if text exists
+    pdf-bookmarker scanned.pdf --ocr never   # never OCR; fail on scanned PDFs
+
+On the web app, OCR runs in `auto` mode and scanned PDFs longer than
+`OCR_MAX_PAGES` (default 50) are rejected to bound processing cost.
+
 ## Limitations
 
-- Text-based PDFs only. Scanned PDFs (no text layer) are rejected; OCR is a
-  planned extension (`extractor.py` is the seam).
 - Encrypted PDFs are not supported.
 
 ## Development
@@ -80,6 +96,8 @@ Set environment variables:
   verification when the user does not supply their own API key. Defaults to
   `gemini:gemini-3.5-flash`. The matching provider key (e.g. `GEMINI_API_KEY`)
   must be set.
+- `OCR_MAX_PAGES` — optional. Caps the page count of scanned PDFs eligible
+  for OCR. Defaults to `50`.
 
 The free tier sleeps after idle: the first request afterwards takes ~1 min,
 and in-memory jobs are lost on restart (files are temporary by design).

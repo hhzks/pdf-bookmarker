@@ -14,3 +14,5 @@ services:
         sync: false
       - key: VERIFICATION_MODEL
         sync: false   # optional; defaults to gemini:gemini-3.5-flash
+      - key: OCR_MAX_PAGES
+        sync: false   # optional; defaults to 50

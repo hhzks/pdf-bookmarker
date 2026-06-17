@@ -132,6 +132,8 @@ export default function App() {
             )}
           </div>
 
+          <p className="note">Scanned PDFs are supported via OCR.</p>
+
           <fieldset className="options">
             <legend>LLM verification</legend>
             {[
