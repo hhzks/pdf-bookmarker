@@ -1,0 +1,10 @@
+# Fine-tuning dependencies (training/finetune.py only).
+# Deliberately NOT part of the app's pyproject deps — the pipeline, CLI, and
+# web backend must never pull in torch.
+torch>=2.4
+transformers>=4.48
+datasets>=3.0
+accelerate>=1.0
+peft>=0.14
+trl>=0.17
+bitsandbytes>=0.45; platform_system != "Darwin"

@@ -81,8 +81,26 @@ API key in the env) over PDFs with **no** embedded outline and records its
 outline as a silver label (`"silver": true`) in the harvest record shape —
 `build_dataset.py` consumes it directly. Resumable; one LLM call per PDF.
 
+## 6. Fine-tune (QLoRA)
+
+```bash
+pip install -r training/requirements.txt   # torch/trl/peft — training only, never app deps
+python training/finetune.py dataset/ -o checkpoints/outline-lora
+```
+
+QLoRA (4-bit NF4) over the SFT splits; defaults to `Qwen/Qwen2.5-1.5B-Instruct`,
+LoRA r=16 on all linear layers, completion-only loss, 2 epochs. Needs a CUDA
+GPU (~6 GB VRAM); on CPU pass `--no-4bit` (slow — use a smaller `--base-model`).
+Trains on the raw prompt/completion text (no chat template) because the planned
+`local:` backend will prompt with raw `llm.PROMPT` text too — train == serve.
+
+Then evaluate: generate outlines for `test.jsonl` contexts with the adapter,
+write `{"sha256", "entries"}` lines, and score with `evaluate.py` against the
+heuristic baseline.
+
 ## Remaining (not yet built)
 
-- Fine-tuning script (QLoRA over `dataset/train.jsonl`) and a `local:`
-  backend in `pdf_bookmarker/llm.py` with grammar-constrained decoding.
+- Merge the adapter + GGUF export, and a `local:` backend in
+  `pdf_bookmarker/llm.py` with grammar-constrained decoding (llama.cpp GBNF
+  from the `llm.Outline` schema).
 - End-to-end page-placement metric via `locator.locate_entries`.
