@@ -44,11 +44,45 @@ TOC rows — **not** taken from `get_toc()`, whose page numbers are physical
 indices, not printed ones. TOC-path documents whose outline aligns with fewer
 than `--min-alignment` (default 0.6) of TOC rows are dropped as label noise.
 
-## Next steps (not yet built)
+## 3. Build the SFT dataset
 
-- Dedup by `sha256`; split by document into train/val/test.
-- Format records as `llm._PROMPT` + `_Outline` JSON for SFT (train == serve).
-- Distill the frontier backend over no-bookmark PDFs to cover the
-  heading-candidate path, which is underrepresented in bookmarked corpora.
-- Eval harness: entry-set F1, level accuracy, end-to-end page placement via
-  `locator.locate_entries`.
+```bash
+python training/build_dataset.py records.jsonl [silver.jsonl ...] -o dataset/
+```
+
+Dedups by `sha256`, splits by document (deterministically — a doc's split is
+derived from its hash, so re-running with more data never moves an existing
+doc between splits), and writes `dataset/{train,val,test}.jsonl` of
+`{"prompt", "completion", "meta"}`. The prompt is `llm._PROMPT` with the
+record's context and the completion is `llm._Outline` JSON — the exact
+serving format, so train == serve by construction.
+
+## 4. Evaluate
+
+```bash
+python training/evaluate.py records.jsonl --backend heuristic     # baseline
+python training/evaluate.py records.jsonl --predictions preds.jsonl
+```
+
+Macro-averaged title F1, level accuracy on matched titles, and printed-page
+accuracy. The heuristic baseline (the non-LLM pipeline path) is the score any
+fine-tuned model must beat. To evaluate a model, run it over the records'
+contexts and write `{"sha256", "entries"}` lines.
+
+## 5. Distill silver labels (optional, costs API money)
+
+```bash
+python training/distill.py corpus/ -o silver.jsonl --limit 20
+```
+
+Bookmarked corpora over-represent the TOC path, so the heading-candidate path
+is data-starved. This runs a shipped backend (default `anthropic`, needs the
+API key in the env) over PDFs with **no** embedded outline and records its
+outline as a silver label (`"silver": true`) in the harvest record shape —
+`build_dataset.py` consumes it directly. Resumable; one LLM call per PDF.
+
+## Remaining (not yet built)
+
+- Fine-tuning script (QLoRA over `dataset/train.jsonl`) and a `local:`
+  backend in `pdf_bookmarker/llm.py` with grammar-constrained decoding.
+- End-to-end page-placement metric via `locator.locate_entries`.
