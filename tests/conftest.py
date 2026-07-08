@@ -168,6 +168,32 @@ def bookmarked_pdf(tmp_path_factory):
 
 
 @pytest.fixture(scope="session")
+def outlined_toc_pdf(tmp_path_factory):
+    """toc_pdf layout plus an embedded outline — a harvestable training doc.
+    get_toc() pages are 1-based physical; printed page N == physical index N-1."""
+    doc = fitz.open()
+    _add_page(doc, [("My Book", 24, "hebo", 72)])
+    _add_page(doc, [
+        ("Contents", 16, "hebo", 72),
+        ("1 Introduction .......... 3", 10, "helv", 72),
+        ("1.1 Background .......... 3", 10, "helv", 90),
+        ("2 Methods .......... 4", 10, "helv", 72),
+        ("3 Results .......... 5", 10, "helv", 72),
+    ])
+    _add_page(doc, [("1 Introduction", 16, "hebo", 72), *_body_rows(),
+                    ("1.1 Background", 13, "hebo", 72), *_body_rows()])
+    _add_page(doc, [("2 Methods", 16, "hebo", 72), *_body_rows()])
+    _add_page(doc, [("3 Results", 16, "hebo", 72), *_body_rows()])
+    doc.set_toc([
+        [1, "1 Introduction", 3],
+        [2, "1.1 Background", 3],
+        [1, "2 Methods", 4],
+        [1, "3 Results", 5],
+    ])
+    return _save(doc, tmp_path_factory, "outlined_toc.pdf")
+
+
+@pytest.fixture(scope="session")
 def encrypted_pdf(tmp_path_factory):
     doc = fitz.open()
     _add_page(doc, [("Secret", 12, "helv", 72)])
