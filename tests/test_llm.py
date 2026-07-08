@@ -31,8 +31,8 @@ class FakeMessages:
     def parse(self, **kwargs):
         self._captured.update(kwargs)
         return SimpleNamespace(
-            parsed_output=llm._Outline(
-                entries=[llm._OutlineItem(title="Intro", level=1, printed_page=3)]
+            parsed_output=llm.Outline(
+                entries=[llm.OutlineItem(title="Intro", level=1, printed_page=3)]
             )
         )
 
@@ -84,8 +84,8 @@ class FakeGeminiModels:
     def generate_content(self, **kwargs):
         self._captured.update(kwargs)
         return SimpleNamespace(
-            parsed=llm._Outline(
-                entries=[llm._OutlineItem(title="Intro", level=1, printed_page=3)]
+            parsed=llm.Outline(
+                entries=[llm.OutlineItem(title="Intro", level=1, printed_page=3)]
             )
         )
 
@@ -107,7 +107,7 @@ def test_gemini_backend_parses_outline(monkeypatch):
     assert entries == [OutlineEntry(title="Intro", level=1, printed_page=3)]
     assert captured["model"] == "gemini-3.5-flash"
     assert "1 Intro" in captured["contents"]
-    assert captured["config"]["response_schema"] is llm._Outline
+    assert captured["config"]["response_schema"] is llm.Outline
     assert captured["config"]["response_mime_type"] == "application/json"
 
 

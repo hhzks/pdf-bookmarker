@@ -12,7 +12,7 @@ import distill
 import evaluate
 import harvest
 
-from pdf_bookmarker.llm import _PROMPT
+from pdf_bookmarker.llm import PROMPT
 from pdf_bookmarker.models import OutlineEntry
 
 
@@ -39,7 +39,7 @@ def test_to_sft_matches_serving_format():
         "entries": [{"title": "Intro", "level": 1, "printed_page": 3}],
     }
     sft = build_dataset.to_sft(record)
-    assert sft["prompt"] == _PROMPT.format(context=record["context"])
+    assert sft["prompt"] == PROMPT.format(context=record["context"])
     assert json.loads(sft["completion"]) == {
         "entries": [{"title": "Intro", "level": 1, "printed_page": 3}]
     }

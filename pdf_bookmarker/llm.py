@@ -18,17 +18,19 @@ class LLMBackend(Protocol):
         ...
 
 
-class _OutlineItem(BaseModel):
+# Public: the training tooling (training/) builds SFT datasets from PROMPT and
+# Outline so that training format == serving format. Change them together.
+class OutlineItem(BaseModel):
     title: str
     level: int
     printed_page: int | None = None
 
 
-class _Outline(BaseModel):
-    entries: list[_OutlineItem]
+class Outline(BaseModel):
+    entries: list[OutlineItem]
 
 
-_PROMPT = """The following text was extracted from a PDF. It contains either a table of
+PROMPT = """The following text was extracted from a PDF. It contains either a table of
 contents or a list of candidate section headings (with font metadata). Produce the
 document outline: one entry per real section, in document order. `level` is the nesting
 depth (1 = chapter, 2 = subchapter, ...). Set `printed_page` when a page number is shown
@@ -53,8 +55,8 @@ class AnthropicBackend:
             model=self._model,
             max_tokens=16000,
             thinking={"type": "adaptive"},
-            messages=[{"role": "user", "content": _PROMPT.format(context=context)}],
-            output_format=_Outline,
+            messages=[{"role": "user", "content": PROMPT.format(context=context)}],
+            output_format=Outline,
         )
         outline = response.parsed_output
         return [
@@ -81,10 +83,10 @@ class GeminiBackend:
     def parse_outline(self, context: str) -> list[OutlineEntry]:
         response = self._client.models.generate_content(
             model=self._model,
-            contents=_PROMPT.format(context=context),
+            contents=PROMPT.format(context=context),
             config={
                 "response_mime_type": "application/json",
-                "response_schema": _Outline,
+                "response_schema": Outline,
             },
         )
         outline = response.parsed

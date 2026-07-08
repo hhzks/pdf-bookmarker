@@ -3,7 +3,7 @@
 Reads one or more records.jsonl files produced by harvest.py (or distill.py),
 dedups by sha256, splits by *document* (so no PDF leaks across splits), and
 formats each record exactly the way the serving path prompts the model:
-llm._PROMPT with the record's context, completing with llm._Outline JSON.
+llm.PROMPT with the record's context, completing with llm.Outline JSON.
 Train == serve, by construction.
 
 The split is deterministic — a document's bucket is derived from its sha256 —
@@ -24,7 +24,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from pdf_bookmarker.llm import _PROMPT, _Outline
+from pdf_bookmarker.llm import PROMPT, Outline
 
 _BUCKETS = 1000
 
@@ -45,9 +45,9 @@ def to_sft(record: dict) -> dict:
     Validates the gold entries through the same Pydantic schema the serving
     backends use, so a malformed record fails here rather than at train time.
     """
-    outline = _Outline(entries=record["entries"])
+    outline = Outline(entries=record["entries"])
     return {
-        "prompt": _PROMPT.format(context=record["context"]),
+        "prompt": PROMPT.format(context=record["context"]),
         "completion": outline.model_dump_json(),
         "meta": {
             "sha256": record["sha256"],

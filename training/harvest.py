@@ -22,7 +22,7 @@ Each output line is one JSON record:
       "alignment": 0.94        # null for headings-path docs
     }
 
-`entries` matches the shape of llm._Outline, so dataset construction is just
+`entries` matches the shape of llm.Outline, so dataset construction is just
 prompt formatting.
 """
 import argparse

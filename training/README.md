@@ -36,7 +36,7 @@ For each kept PDF it emits one JSON line:
 - `context` — the exact string the serving path would send to the model
   (`pipeline.build_llm_context`), either TOC text or candidate heading lines.
 - `entries` — gold `{title, level, printed_page}` items in the shape of
-  `llm._Outline`.
+  `llm.Outline`.
 - `context_kind` — `"toc"` or `"headings"`, `alignment`, `sha256`, etc.
 
 `printed_page` is recovered by fuzzy-aligning gold titles against the parsed
@@ -53,8 +53,8 @@ python training/build_dataset.py records.jsonl [silver.jsonl ...] -o dataset/
 Dedups by `sha256`, splits by document (deterministically — a doc's split is
 derived from its hash, so re-running with more data never moves an existing
 doc between splits), and writes `dataset/{train,val,test}.jsonl` of
-`{"prompt", "completion", "meta"}`. The prompt is `llm._PROMPT` with the
-record's context and the completion is `llm._Outline` JSON — the exact
+`{"prompt", "completion", "meta"}`. The prompt is `llm.PROMPT` with the
+record's context and the completion is `llm.Outline` JSON — the exact
 serving format, so train == serve by construction.
 
 ## 4. Evaluate
