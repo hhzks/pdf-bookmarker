@@ -37,4 +37,4 @@ def test_parser_defaults(tmp_path):
 
 def test_main_fails_cleanly_without_data(tmp_path, capsys):
     assert finetune.main([str(tmp_path), "-o", str(tmp_path / "out")]) == 1
-    assert "no training records" in capsys.readouterr().err
+    assert "no usable training records" in capsys.readouterr().err

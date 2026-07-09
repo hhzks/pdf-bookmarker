@@ -47,9 +47,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--batch-size", type=int, default=1)
     parser.add_argument("--grad-accum", type=int, default=8)
-    parser.add_argument("--max-seq-len", type=int, default=8192,
-                        help="build_llm_context caps candidates at 400 lines; "
-                        "8k tokens covers that with headroom")
+    parser.add_argument("--max-seq-len", type=int, default=4096,
+                        help="examples longer than this are DROPPED, not "
+                        "truncated — truncation would clip the JSON completion "
+                        "and teach the model to emit cut-off output. 4096 "
+                        "keeps ~80%% of harvested docs and fits 12 GB VRAM; "
+                        "8192 needs a bigger GPU")
     parser.add_argument("--lora-r", type=int, default=16)
     parser.add_argument("--lora-alpha", type=int, default=32)
     parser.add_argument("--lora-dropout", type=float, default=0.05)
@@ -64,10 +67,23 @@ def main(argv: list[str] | None = None) -> int:
 
     train_records = load_split(args.dataset_dir / "train.jsonl")
     val_records = load_split(args.dataset_dir / "val.jsonl")
+
+    # Drop over-long examples (~3 chars/token is a conservative estimate for
+    # this data) instead of letting the trainer truncate their completions.
+    max_chars = args.max_seq_len * 3
+    fits = lambda r: len(r["prompt"]) + len(r["completion"]) <= max_chars
+    train_kept = [r for r in train_records if fits(r)]
+    val_kept = [r for r in val_records if fits(r)]
+    print(
+        f"train: {len(train_kept)} (dropped {len(train_records) - len(train_kept)} "
+        f"over-long)  val: {len(val_kept)} "
+        f"(dropped {len(val_records) - len(val_kept)})",
+        file=sys.stderr,
+    )
+    train_records, val_records = train_kept, val_kept
     if not train_records:
-        print(f"no training records in {args.dataset_dir}", file=sys.stderr)
+        print(f"no usable training records in {args.dataset_dir}", file=sys.stderr)
         return 1
-    print(f"train: {len(train_records)}  val: {len(val_records)}", file=sys.stderr)
 
     try:
         # datasets must be imported BEFORE torch: the reverse order segfaults
