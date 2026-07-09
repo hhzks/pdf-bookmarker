@@ -16,8 +16,19 @@ that don't are filtered out at harvest time, so over-fetching is cheap. The
 fetcher sleeps 3s between requests (arXiv API guidelines), skips files it
 already has, and appends provenance to `corpus/arxiv/manifest.jsonl`.
 
-You can also drop PDFs from any other source (OpenStax, govinfo, NIST, DOAB…)
-into a directory — harvesting is source-agnostic.
+```bash
+python training/fetch_nist.py -o corpus/nist
+```
+
+NIST SP 800-series publications (public domain) are richly bookmarked with
+formal printed TOCs — the best printed_page training data. There is no
+directory listing, so the fetcher probes the predictable nvlpubs URL space
+(highest revision first); 404s are expected.
+
+You can also drop PDFs from any other source into a directory — harvesting is
+source-agnostic. Sources checked and rejected: govinfo CFR volumes carry no
+embedded outline (fail the harvest gate); OAPEN's legacy REST API no longer
+exposes files.
 
 **Licensing:** the arXiv API does not report per-paper licenses. Check
 `https://arxiv.org/abs/<id>` before redistributing a corpus; prefer
