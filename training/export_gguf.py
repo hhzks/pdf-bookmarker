@@ -77,7 +77,10 @@ def main(argv: list[str] | None = None) -> int:
     workdir.mkdir(parents=True, exist_ok=True)
     merged_dir = workdir / "merged"
     try:
-        merge_adapter(args.adapter, args.base_model, merged_dir)
+        if (merged_dir / "config.json").exists():
+            print(f"reusing merged model in {merged_dir}", file=sys.stderr)
+        else:
+            merge_adapter(args.adapter, args.base_model, merged_dir)
         converter = find_converter(args.llama_cpp, workdir)
         args.output.parent.mkdir(parents=True, exist_ok=True)
         print(f"converting to GGUF ({args.outtype})...", file=sys.stderr)
