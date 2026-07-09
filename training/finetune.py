@@ -70,8 +70,11 @@ def main(argv: list[str] | None = None) -> int:
     print(f"train: {len(train_records)}  val: {len(val_records)}", file=sys.stderr)
 
     try:
-        import torch
+        # datasets must be imported BEFORE torch: the reverse order segfaults
+        # (0xC0000005) on Windows with torch 2.7 + pyarrow 24.
         from datasets import Dataset
+
+        import torch
         from peft import LoraConfig
         from transformers import AutoModelForCausalLM, AutoTokenizer
         from trl import SFTConfig, SFTTrainer
