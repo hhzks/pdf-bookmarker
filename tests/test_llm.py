@@ -1,5 +1,7 @@
+import json
 import os
-from types import SimpleNamespace
+import sys
+from types import ModuleType, SimpleNamespace
 
 import pytest
 
@@ -140,6 +142,59 @@ def test_gemini_backend_live():
     assert entries
     assert entries[0].level == 1
     assert any(e.level == 2 for e in entries)
+
+
+def _fake_llama_cpp(monkeypatch, captured, response_text):
+    """Inject a fake llama_cpp module (the real one is an optional extra)."""
+
+    class FakeLlama:
+        def __init__(self, model_path, **kwargs):
+            captured["model_path"] = model_path
+            captured.update(kwargs)
+
+        def __call__(self, prompt, **kwargs):
+            captured["prompt"] = prompt
+            captured.update(kwargs)
+            return {"choices": [{"text": response_text}]}
+
+    fake = ModuleType("llama_cpp")
+    fake.Llama = FakeLlama
+    fake.LlamaGrammar = SimpleNamespace(
+        from_json_schema=lambda schema: ("grammar", schema)
+    )
+    monkeypatch.setitem(sys.modules, "llama_cpp", fake)
+
+
+def test_local_backend_parses_outline(monkeypatch):
+    captured = {}
+    _fake_llama_cpp(
+        monkeypatch, captured,
+        '{"entries": [{"title": "Intro", "level": 1, "printed_page": 3}]}',
+    )
+    backend = llm.get_backend(r"local:models\outline.gguf")
+    entries = backend.parse_outline("1 Intro .......... 3")
+    assert entries == [OutlineEntry(title="Intro", level=1, printed_page=3)]
+    assert captured["model_path"] == r"models\outline.gguf"
+    assert "1 Intro" in captured["prompt"]
+    # Generation is grammar-constrained to the Outline JSON schema.
+    kind, schema = captured["grammar"]
+    assert kind == "grammar"
+    assert json.loads(schema) == llm.Outline.model_json_schema()
+    assert captured["temperature"] == 0.0
+
+
+def test_local_backend_windows_path_keeps_drive_colon(monkeypatch):
+    captured = {}
+    _fake_llama_cpp(monkeypatch, captured, '{"entries": []}')
+    llm.get_backend(r"local:C:\models\outline.gguf")
+    assert captured["model_path"] == r"C:\models\outline.gguf"
+
+
+def test_local_backend_requires_model_path(monkeypatch):
+    captured = {}
+    _fake_llama_cpp(monkeypatch, captured, '{"entries": []}')
+    with pytest.raises(ValueError, match="model path"):
+        llm.get_backend("local")
 
 
 @pytest.mark.parametrize(

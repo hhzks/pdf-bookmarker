@@ -11,6 +11,7 @@ dependencies = ["pymupdf>=1.24", "anthropic>=0.40", "pydantic>=2.7"]
 
 [project.optional-dependencies]
 gemini = ["google-genai>=1.0"]
+local = ["llama-cpp-python>=0.3"]
 web = ["fastapi>=0.115", "uvicorn[standard]>=0.30", "python-multipart>=0.0.9"]
 dev = [
     "pytest>=8",

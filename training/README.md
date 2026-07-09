@@ -109,9 +109,19 @@ Then evaluate: generate outlines for `test.jsonl` contexts with the adapter,
 write `{"sha256", "entries"}` lines, and score with `evaluate.py` against the
 heuristic baseline.
 
+## 7. Export for serving
+
+```bash
+python training/export_gguf.py checkpoints/outline-lora-v2 -o models/outline.gguf
+pdf-bookmarker input.pdf --llm --model "local:models/outline.gguf"
+```
+
+Merges the adapter into the base model (peft) and converts to GGUF (q8_0 by
+default, ~1.7 GB) via llama.cpp's converter, shallow-cloned automatically.
+The `local:` backend in `pdf_bookmarker/llm.py` runs it with llama-cpp-python
+and grammar-constrained decoding — output is forced to the `llm.Outline` JSON
+schema, eliminating parse failures.
+
 ## Remaining (not yet built)
 
-- Merge the adapter + GGUF export, and a `local:` backend in
-  `pdf_bookmarker/llm.py` with grammar-constrained decoding (llama.cpp GBNF
-  from the `llm.Outline` schema).
 - End-to-end page-placement metric via `locator.locate_entries`.

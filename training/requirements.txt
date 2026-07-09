@@ -8,3 +8,4 @@ accelerate>=1.0
 peft>=0.14
 trl>=0.17
 bitsandbytes>=0.45; platform_system != "Darwin"
+gguf>=0.10  # for llama.cpp's convert_hf_to_gguf.py (export_gguf.py)

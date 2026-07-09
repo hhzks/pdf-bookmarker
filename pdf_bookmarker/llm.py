@@ -3,6 +3,7 @@
 To add a provider: implement the LLMBackend protocol and register the class
 in _BACKENDS. Selection is via "provider:model-id" strings (e.g. --model).
 """
+import json
 from typing import Protocol
 
 from pydantic import BaseModel
@@ -96,9 +97,52 @@ class GeminiBackend:
         ]
 
 
+class LocalBackend:
+    """Local GGUF model via llama-cpp-python; no API key, nothing leaves the
+    machine. The model part of the spec is the path to a .gguf file, e.g.
+    --model "local:models/outline.gguf" (produce one with
+    training/export_gguf.py). Output is grammar-constrained to the Outline
+    schema, so the model cannot emit malformed JSON."""
+
+    _N_CTX = 16384  # must cover prompt + generated outline
+
+    def __init__(self, model: str = "", api_key: str | None = None):
+        # api_key is accepted for LLMBackend compatibility and ignored.
+        if not model:
+            raise ValueError(
+                "the local backend needs a model path, e.g. "
+                '--model "local:models/outline.gguf"'
+            )
+        try:
+            import llama_cpp  # lazy import: shipped as the [local] extra
+        except ImportError as exc:
+            raise ImportError(
+                'llama-cpp-python is not installed; run pip install "pdf-bookmarker[local]"'
+            ) from exc
+
+        self._grammar = llama_cpp.LlamaGrammar.from_json_schema(
+            json.dumps(Outline.model_json_schema())
+        )
+        self._llm = llama_cpp.Llama(model_path=model, n_ctx=self._N_CTX, verbose=False)
+
+    def parse_outline(self, context: str) -> list[OutlineEntry]:
+        result = self._llm(
+            PROMPT.format(context=context),
+            max_tokens=4096,
+            temperature=0.0,
+            grammar=self._grammar,
+        )
+        outline = Outline.model_validate_json(result["choices"][0]["text"])
+        return [
+            OutlineEntry(title=item.title, level=item.level, printed_page=item.printed_page)
+            for item in outline.entries
+        ]
+
+
 _BACKENDS: dict[str, type] = {
     "anthropic": AnthropicBackend,
     "gemini": GeminiBackend,
+    "local": LocalBackend,
 }
 
 # Env vars each provider's SDK reads its key from (first name used in warnings).

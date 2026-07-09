@@ -34,6 +34,18 @@ The Google Gemini backend needs the `gemini` extra and a key in
 
     pip install -e ".[gemini]"
 
+### Local model (no API key)
+
+A fine-tuned local model can replace the cloud LLM entirely — nothing leaves
+your machine:
+
+    pip install -e ".[local]"     # llama-cpp-python, CPU is fine
+    pdf-bookmarker input.pdf --llm --model "local:models/outline.gguf"
+
+Generation is grammar-constrained to the outline JSON schema, so the model
+cannot produce malformed output. See `training/README.md` for how to build
+the GGUF (harvest data, QLoRA fine-tune, `export_gguf.py`).
+
 The LLM layer is provider-agnostic: implement `pdf_bookmarker.llm.LLMBackend`,
 register the class in `_BACKENDS`, and (optionally) list its key env vars in
 `ENV_KEYS` to add another provider.
