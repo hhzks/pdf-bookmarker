@@ -63,7 +63,7 @@ def build(
     """Returns {split_name: record_count} (plus a "duplicates" count)."""
     out_dir.mkdir(parents=True, exist_ok=True)
     counts: Counter[str] = Counter()
-    seen: set[str] = set()
+    seen: set[tuple[str, str]] = set()
     handles = {
         name: open(out_dir / f"{name}.jsonl", "w", encoding="utf-8")
         for name in ("train", "val", "test")
@@ -73,11 +73,19 @@ def build(
             with open(record_file, encoding="utf-8") as f:
                 for line in f:
                     record = json.loads(line)
-                    if record["sha256"] in seen:
+                    # A doc and its synthetic headings twin share a sha256;
+                    # dedup per (doc, kind) but split per doc so the twin can
+                    # never land in a different split than its parent.
+                    key = (record["sha256"], record["context_kind"])
+                    if key in seen:
                         counts["duplicates"] += 1
                         continue
-                    seen.add(record["sha256"])
+                    seen.add(key)
                     split = split_of(record["sha256"], train_frac, val_frac)
+                    if record["context_kind"] == "headings-synthetic" and split != "train":
+                        # Augmentation is train-only; val/test stay real.
+                        counts["synthetic-skipped-eval"] += 1
+                        continue
                     handles[split].write(
                         json.dumps(to_sft(record), ensure_ascii=False) + "\n"
                     )
@@ -99,7 +107,7 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--train + --val must leave room for a test split")
 
     counts = build(args.records, args.out, args.train_frac, args.val_frac)
-    for name in ("train", "val", "test", "duplicates"):
+    for name in ("train", "val", "test", "duplicates", "synthetic-skipped-eval"):
         print(f"{name}: {counts.get(name, 0)}", file=sys.stderr)
     return 0 if counts.get("train") else 1
 

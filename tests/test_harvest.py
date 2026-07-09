@@ -12,8 +12,9 @@ import harvest
 # --- harvest_pdf ------------------------------------------------------------
 
 def test_harvest_toc_path(outlined_toc_pdf):
-    record, reason = harvest.harvest_pdf(outlined_toc_pdf)
+    records, reason = harvest.harvest_pdf(outlined_toc_pdf)
     assert reason is None
+    (record,) = records
     assert record["context_kind"] == "toc"
     assert record["context"].startswith("Table of contents text:")
     assert record["alignment"] == 1.0
@@ -28,8 +29,9 @@ def test_harvest_toc_path(outlined_toc_pdf):
 
 def test_harvest_headings_path(bookmarked_pdf):
     """Outline but no TOC page -> heading-candidate context, no printed pages."""
-    record, reason = harvest.harvest_pdf(bookmarked_pdf, min_pages=1)
+    records, reason = harvest.harvest_pdf(bookmarked_pdf, min_pages=1)
     assert reason is None
+    (record,) = records
     assert record["context_kind"] == "headings"
     assert record["context"].startswith("Candidate heading lines")
     assert record["alignment"] is None
@@ -39,21 +41,46 @@ def test_harvest_headings_path(bookmarked_pdf):
 
 
 def test_harvest_skips_unlabeled(plain_pdf):
-    record, reason = harvest.harvest_pdf(plain_pdf)
-    assert record is None
+    records, reason = harvest.harvest_pdf(plain_pdf)
+    assert records is None
     assert reason == "no-embedded-outline"
 
 
 def test_harvest_skips_encrypted(encrypted_pdf):
-    record, reason = harvest.harvest_pdf(encrypted_pdf)
-    assert record is None
+    records, reason = harvest.harvest_pdf(encrypted_pdf)
+    assert records is None
     assert reason == "encrypted"
 
 
 def test_harvest_skips_short(outlined_toc_pdf):
-    record, reason = harvest.harvest_pdf(outlined_toc_pdf, min_pages=10)
-    assert record is None
+    records, reason = harvest.harvest_pdf(outlined_toc_pdf, min_pages=10)
+    assert records is None
     assert reason == "too-short"
+
+
+def test_harvest_augment_headings(outlined_toc_pdf):
+    records, reason = harvest.harvest_pdf(outlined_toc_pdf, augment_headings=True)
+    assert reason is None
+    real, synth = records
+    assert real["context_kind"] == "toc"
+    assert synth["context_kind"] == "headings-synthetic"
+    assert synth["sha256"] == real["sha256"]  # same doc -> same split later
+    # Context is rebuilt from body lines only, so it takes the candidate
+    # branch and must not contain the TOC rows.
+    assert synth["context"].startswith("Candidate heading lines")
+    assert ".........." not in synth["context"]
+    # Same gold titles/levels, but printed pages are unknowable body-side.
+    assert [e["title"] for e in synth["entries"]] == [e["title"] for e in real["entries"]]
+    assert all(e["printed_page"] is None for e in synth["entries"])
+
+
+def test_harvest_augment_skips_headings_docs(bookmarked_pdf):
+    """No TOC pages -> nothing to synthesize; still a single record."""
+    records, reason = harvest.harvest_pdf(
+        bookmarked_pdf, min_pages=1, augment_headings=True
+    )
+    assert reason is None
+    assert len(records) == 1
 
 
 def test_harvest_cli_writes_jsonl(outlined_toc_pdf, plain_pdf, tmp_path):

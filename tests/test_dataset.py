@@ -22,9 +22,10 @@ def harvest_records(outlined_toc_pdf, bookmarked_pdf, tmp_path_factory):
     path = tmp_path_factory.mktemp("dataset") / "records.jsonl"
     with open(path, "w", encoding="utf-8") as f:
         for pdf, kwargs in ((outlined_toc_pdf, {}), (bookmarked_pdf, {"min_pages": 1})):
-            record, reason = harvest.harvest_pdf(pdf, **kwargs)
+            records, reason = harvest.harvest_pdf(pdf, **kwargs)
             assert reason is None
-            f.write(json.dumps(record) + "\n")
+            for record in records:
+                f.write(json.dumps(record) + "\n")
     return path
 
 
@@ -65,6 +66,32 @@ def test_build_dedups_and_splits(harvest_records, tmp_path):
         lines += (out / f"{name}.jsonl").read_text(encoding="utf-8").splitlines()
     assert len(lines) == 2
     assert all("prompt" in json.loads(l) and "completion" in json.loads(l) for l in lines)
+
+
+def test_build_synthetic_records_train_only(tmp_path):
+    """Synthetic twins share the parent sha256; they train but never eval."""
+    base = {
+        "context": "Candidate heading lines ...",
+        "file": "x.pdf",
+        "entries": [{"title": "Intro", "level": 1, "printed_page": None}],
+    }
+    # Craft shas whose first 8 hex digits bucket to train (<800) and val
+    # (800-899): bucket = int(sha[:8], 16) % 1000.
+    shas = {"train": "00000000" + "0" * 56, "val": f"{850:08x}" + "0" * 56}
+    assert build_dataset.split_of(shas["train"], 0.8, 0.1) == "train"
+    assert build_dataset.split_of(shas["val"], 0.8, 0.1) == "val"
+    records = tmp_path / "records.jsonl"
+    with open(records, "w", encoding="utf-8") as f:
+        for split_name in ("train", "val"):
+            for kind in ("toc", "headings-synthetic"):
+                f.write(json.dumps(
+                    {**base, "sha256": shas[split_name], "context_kind": kind}
+                ) + "\n")
+    counts = build_dataset.build([records], tmp_path / "out", 0.8, 0.1)
+    assert counts["train"] == 2               # real + synthetic
+    assert counts["val"] == 1                 # real only
+    assert counts["synthetic-skipped-eval"] == 1
+    assert counts.get("duplicates", 0) == 0   # (sha, kind) key, not sha
 
 
 # --- evaluate ----------------------------------------------------------------

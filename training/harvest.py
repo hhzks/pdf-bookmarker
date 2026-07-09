@@ -84,11 +84,16 @@ def harvest_pdf(
     *,
     min_pages: int = 4,
     min_alignment: float = 0.6,
-) -> tuple[dict | None, str | None]:
-    """Turn one PDF into a training record.
+    augment_headings: bool = False,
+) -> tuple[list[dict] | None, str | None]:
+    """Turn one PDF into training record(s).
 
-    Returns (record, None) on success or (None, skip_reason) when the document
-    is unusable as a training example.
+    Returns (records, None) on success or (None, skip_reason) when the document
+    is unusable as a training example. With augment_headings, a TOC-path
+    document yields a second, synthetic record whose context is built as if
+    the TOC pages did not exist — real gold labels for the data-starved
+    heading-candidate path. Synthetic records share the parent's sha256 (same
+    split, no leakage) and are marked context_kind "headings-synthetic".
     """
     path = Path(path)
     try:
@@ -127,19 +132,43 @@ def harvest_pdf(
             alignment = None
             kind = "headings"
 
-        record = {
+        base = {
             "file": str(path),
             "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
             "page_count": doc.page_count,
-            "context_kind": kind,
-            "context": context,
-            "entries": [
-                {"title": title, "level": level, "printed_page": page}
-                for title, level, page in zip(gold_titles, gold_levels, printed)
-            ],
-            "alignment": alignment,
         }
-        return record, None
+        records = [
+            {
+                **base,
+                "context_kind": kind,
+                "context": context,
+                "entries": [
+                    {"title": title, "level": level, "printed_page": page}
+                    for title, level, page in zip(gold_titles, gold_levels, printed)
+                ],
+                "alignment": alignment,
+            }
+        ]
+
+        if augment_headings and toc_pages:
+            toc_page_set = set(toc_pages)
+            body_lines = [l for l in lines if l.page not in toc_page_set]
+            if body_lines:
+                records.append(
+                    {
+                        **base,
+                        "context_kind": "headings-synthetic",
+                        # No toc_pages -> build_llm_context takes the
+                        # heading-candidate branch over the body lines.
+                        "context": pipeline.build_llm_context(body_lines, []),
+                        "entries": [
+                            {"title": t, "level": l, "printed_page": None}
+                            for t, l in zip(gold_titles, gold_levels)
+                        ],
+                        "alignment": None,
+                    }
+                )
+        return records, None
     finally:
         doc.close()
 
@@ -156,6 +185,12 @@ def main(argv: list[str] | None = None) -> int:
         help="drop TOC-path docs whose gold outline matches fewer than this "
         "fraction of parsed TOC rows (label-noise guard)",
     )
+    parser.add_argument(
+        "--augment-headings",
+        action="store_true",
+        help="also emit a synthetic heading-candidate record per TOC-path doc "
+        "(context built as if the TOC pages did not exist)",
+    )
     args = parser.parse_args(argv)
 
     pdfs = sorted(args.pdf_dir.rglob("*.pdf"))
@@ -167,14 +202,18 @@ def main(argv: list[str] | None = None) -> int:
     written = 0
     with open(args.output, "w", encoding="utf-8") as out:
         for pdf in pdfs:
-            record, reason = harvest_pdf(
-                pdf, min_pages=args.min_pages, min_alignment=args.min_alignment
+            records, reason = harvest_pdf(
+                pdf,
+                min_pages=args.min_pages,
+                min_alignment=args.min_alignment,
+                augment_headings=args.augment_headings,
             )
-            if record is None:
+            if records is None:
                 skips[reason] += 1
                 continue
-            out.write(json.dumps(record, ensure_ascii=False) + "\n")
-            written += 1
+            for record in records:
+                out.write(json.dumps(record, ensure_ascii=False) + "\n")
+                written += 1
 
     print(f"wrote {written} records to {args.output}", file=sys.stderr)
     for reason, count in skips.most_common():
