@@ -74,9 +74,22 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--base-model", default=DEFAULT_BASE_MODEL)
     parser.add_argument("--max-new-tokens", type=int, default=4096)
     parser.add_argument("--no-4bit", action="store_true")
+    parser.add_argument("--resume", action="store_true",
+                        help="append to the output file, skipping documents "
+                        "already predicted (for runs cut off mid-way)")
     args = parser.parse_args(argv)
 
     records = load_records(args.records, args.split)
+    mode = "w"
+    if args.resume and args.output.exists():
+        done = {
+            json.loads(line)["sha256"]
+            for line in args.output.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        }
+        records = [r for r in records if r["sha256"] not in done]
+        mode = "a"
+        print(f"resuming: {len(done)} already predicted", file=sys.stderr)
     if not records:
         print("no records to predict", file=sys.stderr)
         return 1
@@ -108,7 +121,7 @@ def main(argv: list[str] | None = None) -> int:
     tokenizer = AutoTokenizer.from_pretrained(str(args.adapter))
 
     parse_errors = 0
-    with open(args.output, "w", encoding="utf-8") as out:
+    with open(args.output, mode, encoding="utf-8") as out:
         for i, record in enumerate(records, 1):
             prompt = PROMPT.format(context=record["context"])
             inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
