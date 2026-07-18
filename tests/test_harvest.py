@@ -159,3 +159,59 @@ def test_parse_feed():
 
 def test_safe_filename_old_style_id():
     assert fetch_arxiv._safe_filename("math/0309136v1") == "math_0309136v1.pdf"
+
+
+class _FakeResponse:
+    def __init__(self, data):
+        self._data = data
+
+    def read(self):
+        return self._data
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+def test_get_backs_off_on_429(monkeypatch):
+    import email.message
+    import urllib.error
+
+    calls = []
+    headers = email.message.Message()
+    headers["Retry-After"] = "1"
+
+    def flaky_urlopen(request, timeout):
+        calls.append(request.full_url)
+        if len(calls) < 3:
+            raise urllib.error.HTTPError(
+                request.full_url, 429, "Too Many Requests", headers, None
+            )
+        return _FakeResponse(b"<feed/>")
+
+    sleeps = []
+    monkeypatch.setattr(fetch_arxiv.urllib.request, "urlopen", flaky_urlopen)
+    monkeypatch.setattr(fetch_arxiv.time, "sleep", sleeps.append)
+
+    assert fetch_arxiv._get("https://x/api") == b"<feed/>"
+    assert len(calls) == 3
+    assert sleeps == [1, 1]  # Retry-After honored
+
+
+def test_search_keeps_partial_results_on_failure(monkeypatch):
+    """A dead search page yields the papers already collected, not a crash."""
+    pages = iter([_FEED.encode("utf-8"), None])
+
+    def one_good_page(url):
+        page = next(pages)
+        if page is None:
+            raise TimeoutError("boom")
+        return page
+
+    monkeypatch.setattr(fetch_arxiv, "_get", one_good_page)
+    monkeypatch.setattr(fetch_arxiv.time, "sleep", lambda s: None)
+
+    papers = fetch_arxiv.search("cat:math.LO", 100)
+    assert [p["arxiv_id"] for p in papers] == ["2401.12345v2", "math/0309136v1"]

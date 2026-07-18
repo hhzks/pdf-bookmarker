@@ -20,6 +20,7 @@ import argparse
 import json
 import sys
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
@@ -58,10 +59,32 @@ def parse_feed(xml_text: str) -> list[dict]:
     return papers
 
 
-def _get(url: str) -> bytes:
+def _get(url: str, retries: int = 4) -> bytes:
+    """GET with backoff on rate limits and transient failures.
+
+    arXiv 429s bursty clients; honoring Retry-After (or an escalating wait)
+    and retrying keeps one throttled request from costing a whole query.
+    """
     request = urllib.request.Request(url, headers={"User-Agent": _USER_AGENT})
-    with urllib.request.urlopen(request, timeout=60) as response:
-        return response.read()
+    for attempt in range(1, retries + 1):
+        try:
+            with urllib.request.urlopen(request, timeout=60) as response:
+                return response.read()
+        except urllib.error.HTTPError as exc:
+            if exc.code not in (429, 500, 502, 503, 504) or attempt == retries:
+                raise
+            retry_after = exc.headers.get("Retry-After", "")
+            wait = int(retry_after) if retry_after.isdigit() else 30 * attempt
+            print(f"  HTTP {exc.code}; backing off {wait}s "
+                  f"(attempt {attempt}/{retries})", file=sys.stderr)
+            time.sleep(wait)
+        except (TimeoutError, urllib.error.URLError, OSError) as exc:
+            if attempt == retries:
+                raise
+            print(f"  network error: {exc}; retrying "
+                  f"(attempt {attempt}/{retries})", file=sys.stderr)
+            time.sleep(10 * attempt)
+    raise AssertionError("unreachable")
 
 
 def search(query: str, max_results: int) -> list[dict]:
@@ -78,7 +101,14 @@ def search(query: str, max_results: int) -> list[dict]:
                 "sortOrder": "descending",
             }
         )
-        batch = parse_feed(_get(f"{API_URL}?{params}").decode("utf-8"))
+        try:
+            batch = parse_feed(_get(f"{API_URL}?{params}").decode("utf-8"))
+        except Exception as exc:
+            # A dead search page shouldn't zero out the query: keep whatever
+            # papers earlier pages returned and let the caller download those.
+            print(f"  search page failed after retries: {exc}; "
+                  f"continuing with {len(papers)} results", file=sys.stderr)
+            break
         if not batch:
             break
         papers.extend(batch)
