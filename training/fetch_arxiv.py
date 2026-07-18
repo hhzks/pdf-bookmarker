@@ -73,8 +73,11 @@ def _get(url: str, retries: int = 4) -> bytes:
         except urllib.error.HTTPError as exc:
             if exc.code not in (429, 500, 502, 503, 504) or attempt == retries:
                 raise
+            # arXiv sends Retry-After: 0 on 503s; honoring that literally
+            # means hammering the API — enforce an escalating floor.
             retry_after = exc.headers.get("Retry-After", "")
-            wait = int(retry_after) if retry_after.isdigit() else 30 * attempt
+            wait = int(retry_after) if retry_after.isdigit() else 0
+            wait = max(wait, 30 * attempt)
             print(f"  HTTP {exc.code}; backing off {wait}s "
                   f"(attempt {attempt}/{retries})", file=sys.stderr)
             time.sleep(wait)

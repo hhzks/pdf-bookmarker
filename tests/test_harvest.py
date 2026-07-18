@@ -181,7 +181,7 @@ def test_get_backs_off_on_429(monkeypatch):
 
     calls = []
     headers = email.message.Message()
-    headers["Retry-After"] = "1"
+    headers["Retry-After"] = "0"  # arXiv really sends this on 503s
 
     def flaky_urlopen(request, timeout):
         calls.append(request.full_url)
@@ -197,7 +197,7 @@ def test_get_backs_off_on_429(monkeypatch):
 
     assert fetch_arxiv._get("https://x/api") == b"<feed/>"
     assert len(calls) == 3
-    assert sleeps == [1, 1]  # Retry-After honored
+    assert sleeps == [30, 60]  # Retry-After: 0 must not defeat the backoff
 
 
 def test_search_keeps_partial_results_on_failure(monkeypatch):
