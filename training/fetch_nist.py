@@ -35,16 +35,29 @@ def candidate_urls(number: int) -> list[str]:
     return urls
 
 
-def try_download(url: str) -> bytes | None:
+def try_download(url: str, retries: int = 3) -> bytes | None:
+    """Fetch one candidate URL; None on 404 or persistent failure.
+
+    nvlpubs occasionally stalls mid-transfer; a lost candidate must cost a
+    retry and a log line, never the whole multi-hour run.
+    """
     request = urllib.request.Request(url, headers={"User-Agent": _USER_AGENT})
-    try:
-        with urllib.request.urlopen(request, timeout=120) as response:
-            data = response.read()
-    except urllib.error.HTTPError as exc:
-        if exc.code == 404:
-            return None
-        raise
-    return data if data.startswith(b"%PDF-") else None
+    for attempt in range(1, retries + 1):
+        try:
+            with urllib.request.urlopen(request, timeout=120) as response:
+                data = response.read()
+        except urllib.error.HTTPError as exc:
+            if exc.code == 404:
+                return None
+            print(f"  HTTP {exc.code} for {url.rsplit('/', 1)[-1]} "
+                  f"(attempt {attempt}/{retries})", file=sys.stderr)
+        except (TimeoutError, urllib.error.URLError, OSError) as exc:
+            print(f"  network error for {url.rsplit('/', 1)[-1]} "
+                  f"(attempt {attempt}/{retries}): {exc}", file=sys.stderr)
+        else:
+            return data if data.startswith(b"%PDF-") else None
+        time.sleep(5 * attempt)
+    return None
 
 
 def fetch(start: int, end: int, out_dir: Path) -> tuple[int, int]:
