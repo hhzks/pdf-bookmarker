@@ -35,6 +35,16 @@ def test_parser_defaults(tmp_path):
     assert not args.no_4bit
 
 
+def test_base_model_default_agrees_across_tools():
+    """An adapter trained on one base and predicted/merged against another
+    produces garbage with no error, so the three defaults must not drift."""
+    import export_gguf
+    import predict
+
+    assert finetune.DEFAULT_BASE_MODEL == predict.DEFAULT_BASE_MODEL
+    assert finetune.DEFAULT_BASE_MODEL == export_gguf.DEFAULT_BASE_MODEL
+
+
 def test_main_fails_cleanly_without_data(tmp_path, capsys):
     assert finetune.main([str(tmp_path), "-o", str(tmp_path / "out")]) == 1
     assert "no usable training records" in capsys.readouterr().err

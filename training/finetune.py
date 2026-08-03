@@ -10,17 +10,25 @@ so the rest of the training tooling (and the app) never needs them:
     pip install -r training/requirements.txt
     python training/finetune.py dataset/ -o checkpoints/outline-lora
 
-4-bit QLoRA needs a CUDA GPU (~6 GB VRAM for the 1.5B default). On CPU or
+4-bit QLoRA needs a CUDA GPU (~7 GB VRAM for the 2B default). On CPU or
 Apple Silicon pass --no-4bit for a plain LoRA run (slow; use a small
 --base-model). The output directory receives the LoRA adapter + tokenizer;
 merging and GGUF export for llama.cpp are a later step (see README).
+
+Qwen3.5 has no -Instruct suffix: "Qwen/Qwen3.5-2B" is the post-trained model
+and "Qwen/Qwen3.5-2B-Base" is the raw pretrained one. Its thinking mode does
+not apply here — that lives in the chat template, and this trains (and serves)
+on the raw prompt, never the template.
 """
 import argparse
 import json
 import sys
 from pathlib import Path
 
-DEFAULT_BASE_MODEL = "Qwen/Qwen2.5-1.5B-Instruct"
+# Must match predict.py and export_gguf.py: predicting with or merging into a
+# different base than the adapter was trained on silently produces garbage.
+# tests/test_finetune.py::test_base_model_default_agrees_across_tools guards this.
+DEFAULT_BASE_MODEL = "Qwen/Qwen3.5-2B"
 
 
 def load_split(path: Path) -> list[dict]:
