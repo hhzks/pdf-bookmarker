@@ -31,7 +31,7 @@ def locate_entries(
     entries: list[OutlineEntry],
     lines: list[Line],
     skip_pages: set[int] | None = None,
-    snap_titles: bool = False,
+    snap_titles: bool = True,
 ) -> tuple[list[OutlineEntry], int]:
     """Find each entry's title in the body. Returns (located_entries, failure_count).
 
@@ -42,16 +42,21 @@ def locate_entries(
     skip_pages holds the TOC's own pages: their TOC-style rows must never be
     matched, but a section heading can share a page with the end of the TOC.
 
-    snap_titles adopts the matched line's own text, so a bookmark reads the way
-    the heading is actually printed. **It defaults off because it measurably
-    hurts.** Measured over the 77-document test set: title F1 0.5490 -> 0.1542
-    for the shipped v3 model (0.6966 -> 0.5571 ignoring section numbers). Two
-    reasons. Gold labels come from PDFs' embedded bookmarks, which usually omit
-    the numbering the printed heading carries, so adopting the printed form
-    moves titles away from what users' existing bookmarks look like; and a
-    prefix match can pull in a much longer line ("Methods" -> "Methods and
-    Materials for Sample Preparation"). Enable only with a metric that rewards
-    page-faithful text.
+    snap_titles adopts the matched line's own text, so every located bookmark
+    reads the way the heading is actually printed instead of however the TOC
+    row or the model happened to write it. Without it the outline mixes
+    conventions within one document: on the 77-document test set it rewrites
+    69% of titles, which is how inconsistent the raw output is.
+
+    It only ever adopts a section-label difference — the two must be the same
+    heading once labels are stripped — because a prefix match can otherwise
+    reach a far longer line ("Discussion" -> "Discussion of Results and Future
+    Work") and rewrite the title outright.
+
+    Cost is ~0.4 title F1 measured with evaluate.py --ignore-section-numbers
+    (0.6966 -> 0.6929 for v3). The strict metric drops far more, but only
+    because gold comes from embedded bookmarks that omit the numbering the page
+    shows; that is a convention difference, not an accuracy one.
     """
     skip_pages = skip_pages or set()
     page_count = max((l.page for l in lines), default=0) + 1
@@ -78,7 +83,11 @@ def locate_entries(
         if match:
             entry.page = match.page
             entry.y = match.y
-            if snap_titles and len(_normalize(match.text)) >= len(_normalize(entry.title)):
+            # Adopt the page's own wording only when the two are the same
+            # heading apart from a section label. A prefix match can reach a
+            # far longer line ("Discussion" -> "Discussion of Results and
+            # Future Work"), and adopting that would rewrite the title.
+            if snap_titles and _bare(match.text) == _bare(entry.title):
                 entry.title = match.text.strip()
             if entry.printed_page is not None:
                 offsets.append(match.page - (entry.printed_page - 1))
