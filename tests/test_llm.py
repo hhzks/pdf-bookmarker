@@ -153,9 +153,16 @@ def _fake_llama_cpp(monkeypatch, captured, response_text):
             captured.update(kwargs)
 
         def __call__(self, prompt, **kwargs):
+            captured["called"] = "raw"
             captured["prompt"] = prompt
             captured.update(kwargs)
             return {"choices": [{"text": response_text}]}
+
+        def create_chat_completion(self, messages, **kwargs):
+            captured["called"] = "chat"
+            captured["messages"] = messages
+            captured.update(kwargs)
+            return {"choices": [{"message": {"content": response_text}}]}
 
     fake = ModuleType("llama_cpp")
     fake.Llama = FakeLlama
@@ -246,3 +253,141 @@ def test_get_backend_api_key_defaults_to_none(monkeypatch):
     _fake_anthropic(monkeypatch, captured)
     llm.get_backend("anthropic")
     assert captured["client_api_key"] is None
+
+
+# --- local backend context size ---------------------------------------------
+
+def test_local_backend_n_ctx_override(monkeypatch):
+    """A teacher-sized model needs a different context than the shipped student."""
+    captured = {}
+    _fake_llama_cpp(monkeypatch, captured, '{"entries": []}')
+    llm.LocalBackend(r"models\teacher.gguf", n_ctx=32768)
+    assert captured["n_ctx"] == 32768
+
+
+def test_get_backend_forwards_n_ctx(monkeypatch):
+    captured = {}
+    _fake_llama_cpp(monkeypatch, captured, '{"entries": []}')
+    llm.get_backend(r"local:models\teacher.gguf", n_ctx=32768)
+    assert captured["n_ctx"] == 32768
+
+
+def test_local_backend_n_ctx_from_env(monkeypatch):
+    """Env var configures the CLI path, which has no place for a kwarg."""
+    captured = {}
+    _fake_llama_cpp(monkeypatch, captured, '{"entries": []}')
+    monkeypatch.setenv("PDF_BOOKMARKER_LOCAL_N_CTX", "8192")
+    llm.get_backend(r"local:models\outline.gguf")
+    assert captured["n_ctx"] == 8192
+
+
+def test_local_backend_n_ctx_kwarg_beats_env(monkeypatch):
+    captured = {}
+    _fake_llama_cpp(monkeypatch, captured, '{"entries": []}')
+    monkeypatch.setenv("PDF_BOOKMARKER_LOCAL_N_CTX", "8192")
+    llm.get_backend(r"local:models\outline.gguf", n_ctx=4096)
+    assert captured["n_ctx"] == 4096
+
+
+def test_local_backend_rejects_unusable_env_n_ctx(monkeypatch):
+    captured = {}
+    _fake_llama_cpp(monkeypatch, captured, '{"entries": []}')
+    monkeypatch.setenv("PDF_BOOKMARKER_LOCAL_N_CTX", "not-a-number")
+    with pytest.raises(ValueError, match="PDF_BOOKMARKER_LOCAL_N_CTX"):
+        llm.get_backend(r"local:models\outline.gguf")
+
+
+def test_local_backend_n_ctx_defaults_to_16384(monkeypatch):
+    captured = {}
+    _fake_llama_cpp(monkeypatch, captured, '{"entries": []}')
+    llm.get_backend(r"local:models\outline.gguf")
+    assert captured["n_ctx"] == 16384
+
+
+# --- local backend GPU offload ----------------------------------------------
+
+def test_local_backend_n_gpu_layers_defaults_to_cpu(monkeypatch):
+    """The shipped student ran CPU-only; that must not change silently."""
+    captured = {}
+    _fake_llama_cpp(monkeypatch, captured, '{"entries": []}')
+    llm.get_backend(r"local:models\outline.gguf")
+    assert captured["n_gpu_layers"] == 0
+
+
+def test_local_backend_n_gpu_layers_override(monkeypatch):
+    captured = {}
+    _fake_llama_cpp(monkeypatch, captured, '{"entries": []}')
+    llm.get_backend(r"local:models\teacher.gguf", n_gpu_layers=-1)
+    assert captured["n_gpu_layers"] == -1
+
+
+def test_local_backend_n_gpu_layers_from_env(monkeypatch):
+    captured = {}
+    _fake_llama_cpp(monkeypatch, captured, '{"entries": []}')
+    monkeypatch.setenv("PDF_BOOKMARKER_LOCAL_N_GPU_LAYERS", "-1")
+    llm.get_backend(r"local:models\outline.gguf")
+    assert captured["n_gpu_layers"] == -1
+
+
+def test_local_backend_rejects_unusable_env_n_gpu_layers(monkeypatch):
+    captured = {}
+    _fake_llama_cpp(monkeypatch, captured, '{"entries": []}')
+    monkeypatch.setenv("PDF_BOOKMARKER_LOCAL_N_GPU_LAYERS", "all")
+    with pytest.raises(ValueError, match="PDF_BOOKMARKER_LOCAL_N_GPU_LAYERS"):
+        llm.get_backend(r"local:models\outline.gguf")
+
+
+# --- local backend chat mode (for off-the-shelf instruct teachers) ----------
+
+def test_local_backend_defaults_to_raw_completion(monkeypatch):
+    """The fine-tuned student was trained on the bare PROMPT, not a chat turn."""
+    captured = {}
+    _fake_llama_cpp(monkeypatch, captured, '{"entries": []}')
+    llm.get_backend(r"local:models\outline.gguf").parse_outline("1 Intro .... 3")
+    assert captured["called"] == "raw"
+
+
+def test_local_backend_chat_mode_uses_chat_completion(monkeypatch):
+    """An instruct teacher needs its embedded chat template applied."""
+    captured = {}
+    _fake_llama_cpp(
+        monkeypatch, captured,
+        '{"entries": [{"title": "Intro", "level": 1, "printed_page": 3}]}',
+    )
+    backend = llm.get_backend(r"local:models\teacher.gguf", chat=True)
+    entries = backend.parse_outline("1 Intro .......... 3")
+    assert captured["called"] == "chat"
+    assert entries == [OutlineEntry(title="Intro", level=1, printed_page=3)]
+    (message,) = captured["messages"]
+    assert message["role"] == "user"
+    assert "1 Intro" in message["content"]
+
+
+def test_local_backend_chat_mode_keeps_the_grammar(monkeypatch):
+    """Constrained decoding is the reason a local teacher can't emit bad JSON."""
+    captured = {}
+    _fake_llama_cpp(monkeypatch, captured, '{"entries": []}')
+    llm.get_backend(r"local:models\teacher.gguf", chat=True).parse_outline("x")
+    kind, schema = captured["grammar"]
+    assert kind == "grammar"
+    assert json.loads(schema) == llm.Outline.model_json_schema()
+    assert captured["temperature"] == 0.0
+
+
+def test_local_backend_no_think_appends_the_switch(monkeypatch):
+    """Qwen3-family soft switch; opt-in so the pilot can A/B it."""
+    captured = {}
+    _fake_llama_cpp(monkeypatch, captured, '{"entries": []}')
+    llm.get_backend(
+        r"local:models\teacher.gguf", chat=True, no_think=True
+    ).parse_outline("1 Intro .... 3")
+    (message,) = captured["messages"]
+    assert message["content"].rstrip().endswith("/no_think")
+
+
+def test_local_backend_no_think_off_by_default(monkeypatch):
+    captured = {}
+    _fake_llama_cpp(monkeypatch, captured, '{"entries": []}')
+    llm.get_backend(r"local:models\teacher.gguf", chat=True).parse_outline("x")
+    (message,) = captured["messages"]
+    assert "/no_think" not in message["content"]

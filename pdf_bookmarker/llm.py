@@ -4,6 +4,7 @@ To add a provider: implement the LLMBackend protocol and register the class
 in _BACKENDS. Selection is via "provider:model-id" strings (e.g. --model).
 """
 import json
+import os
 from typing import Protocol
 
 from pydantic import BaseModel
@@ -105,8 +106,19 @@ class LocalBackend:
     schema, so the model cannot emit malformed JSON."""
 
     _N_CTX = 16384  # must cover prompt + generated outline
+    _N_CTX_ENV = "PDF_BOOKMARKER_LOCAL_N_CTX"
+    _N_GPU_LAYERS = 0  # llama.cpp's own default: CPU only
+    _N_GPU_LAYERS_ENV = "PDF_BOOKMARKER_LOCAL_N_GPU_LAYERS"
 
-    def __init__(self, model: str = "", api_key: str | None = None):
+    def __init__(
+        self,
+        model: str = "",
+        api_key: str | None = None,
+        n_ctx: int | None = None,
+        n_gpu_layers: int | None = None,
+        chat: bool = False,
+        no_think: bool = False,
+    ):
         # api_key is accepted for LLMBackend compatibility and ignored.
         if not model:
             raise ValueError(
@@ -120,19 +132,60 @@ class LocalBackend:
                 'llama-cpp-python is not installed; run pip install "pdf-bookmarker[local]"'
             ) from exc
 
+        self._chat = chat
+        self._no_think = no_think
         self._grammar = llama_cpp.LlamaGrammar.from_json_schema(
             json.dumps(Outline.model_json_schema())
         )
-        self._llm = llama_cpp.Llama(model_path=model, n_ctx=self._N_CTX, verbose=False)
+        self._llm = llama_cpp.Llama(
+            model_path=model,
+            n_ctx=self._int_option(n_ctx, cls_default=self._N_CTX, env=self._N_CTX_ENV),
+            n_gpu_layers=self._int_option(
+                n_gpu_layers, cls_default=self._N_GPU_LAYERS, env=self._N_GPU_LAYERS_ENV
+            ),
+            verbose=False,
+        )
+
+    @staticmethod
+    def _int_option(value: int | None, *, cls_default: int, env: str) -> int:
+        """Explicit kwarg wins, then the env var, then the shipped default.
+
+        The env vars exist because the CLI selects a model with a bare
+        "local:path" spec, which has nowhere to put tuning knobs — but a
+        teacher-sized model (see training/distill.py) needs different ones
+        than the 1.5B student these defaults were chosen for.
+        """
+        if value is not None:
+            return value
+        raw = os.environ.get(env)
+        if raw is None:
+            return cls_default
+        try:
+            return int(raw)
+        except ValueError:
+            raise ValueError(f"{env} must be an integer, not {raw!r}") from None
 
     def parse_outline(self, context: str) -> list[OutlineEntry]:
-        result = self._llm(
-            PROMPT.format(context=context),
-            max_tokens=4096,
-            temperature=0.0,
-            grammar=self._grammar,
-        )
-        outline = Outline.model_validate_json(result["choices"][0]["text"])
+        prompt = PROMPT.format(context=context)
+        if self._chat:
+            # An off-the-shelf instruct model expects its own chat template;
+            # the fine-tuned student instead expects the bare prompt it was
+            # trained on, so raw completion stays the default.
+            if self._no_think:
+                prompt += "\n\n/no_think"
+            result = self._llm.create_chat_completion(
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=4096,
+                temperature=0.0,
+                grammar=self._grammar,
+            )
+            text = result["choices"][0]["message"]["content"]
+        else:
+            result = self._llm(
+                prompt, max_tokens=4096, temperature=0.0, grammar=self._grammar
+            )
+            text = result["choices"][0]["text"]
+        outline = Outline.model_validate_json(text)
         return [
             OutlineEntry(title=item.title, level=item.level, printed_page=item.printed_page)
             for item in outline.entries
@@ -156,15 +209,22 @@ class UnknownProviderError(ValueError):
     """The provider part of a "provider:model-id" spec is not registered."""
 
 
-def get_backend(spec: str, api_key: str | None = None) -> LLMBackend:
-    """Resolve a "provider:model-id" spec (model part optional) to a backend."""
+def get_backend(spec: str, api_key: str | None = None, **options) -> LLMBackend:
+    """Resolve a "provider:model-id" spec (model part optional) to a backend.
+
+    Extra keyword options are passed to the backend constructor; they are
+    provider-specific (e.g. n_ctx for "local"), so an option the selected
+    backend does not accept is a TypeError.
+    """
     provider, _, model = spec.partition(":")
     if provider not in _BACKENDS:
         raise UnknownProviderError(
             f"Unknown LLM provider {provider!r}. Available: {', '.join(sorted(_BACKENDS))}"
         )
     backend_cls = _BACKENDS[provider]
-    return backend_cls(model, api_key=api_key) if model else backend_cls(api_key=api_key)
+    if model:
+        return backend_cls(model, api_key=api_key, **options)
+    return backend_cls(api_key=api_key, **options)
 
 
 def is_low_confidence(
