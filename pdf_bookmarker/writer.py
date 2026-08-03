@@ -8,6 +8,8 @@ def sanitize_levels(entries: list[OutlineEntry]) -> list[OutlineEntry]:
     """PDF outlines must start at level 1 and never jump by more than +1."""
     prev = 0
     for entry in entries:
+        # set_toc raises on anything below 1, and an LLM can emit 0.
+        entry.level = max(entry.level, 1)
         if entry.level > prev + 1:
             entry.level = prev + 1
         prev = entry.level
