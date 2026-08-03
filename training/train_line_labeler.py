@@ -69,7 +69,12 @@ def load(path: Path, test_shas: set[str] | None, train_frac: float, val_frac: fl
 
 def tune_threshold(probabilities, truth, grid=None) -> tuple[float, float]:
     """Pick the probability cut that maximises F1 on held-out data."""
-    grid = grid if grid is not None else np.arange(0.05, 0.96, 0.05)
+    # Reaches past 0.95: with headings at ~1.4% of lines and class_weight
+    # "balanced", the useful cut sits far above 0.5 and a grid ending at 0.95
+    # pins against its own edge.
+    grid = grid if grid is not None else np.concatenate(
+        [np.arange(0.05, 0.95, 0.05), np.arange(0.95, 0.999, 0.005)]
+    )
     positive = truth > 0
     best = (0.5, -1.0)
     for threshold in grid:
@@ -155,9 +160,17 @@ def main(argv: list[str] | None = None) -> int:
             out.write(json.dumps({
                 "sha256": doc["sha256"],
                 "entries": [
-                    # printed_page is unknown to a labeler: it knows the exact
-                    # physical page instead, which is what a bookmark needs.
-                    {"title": e["title"], "level": e["level"], "printed_page": None}
+                    # printed_page is unknown to a labeler, so evaluate.py's
+                    # page_accuracy reads 0 for this model. It knows something
+                    # strictly better: `page`, the exact 0-based physical page,
+                    # which is what set_toc needs and what the generative path
+                    # has to recover through the locator. Score that instead.
+                    {
+                        "title": e["title"],
+                        "level": e["level"],
+                        "printed_page": None,
+                        "page": e["page"],
+                    }
                     for e in entries
                 ],
             }, ensure_ascii=False) + "\n")
