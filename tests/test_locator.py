@@ -65,3 +65,56 @@ def test_unfound_entry_without_hint_is_dropped():
     located, failures = locate_entries(entries, lines)
     assert located == []
     assert failures == 1
+
+
+# --- snapping titles to the text actually on the page -----------------------
+
+def test_locates_across_a_section_number_difference():
+    """An LLM or TOC row may drop the number the printed heading carries."""
+    lines = [
+        Line("1 Introduction", 0, 72, 72, 16, True),
+        Line("body text here", 0, 72, 100, 10, False),
+    ]
+    entries = [OutlineEntry("Introduction", 1, printed_page=1)]
+    located, failures = locate_entries(entries, lines)
+    assert failures == 0
+    assert located[0].page == 0          # found despite the numbering
+    assert located[0].title == "Introduction"   # not snapped: default is off
+
+
+def test_snaps_title_to_the_matched_body_line_when_asked():
+    lines = [Line("1 Introduction", 0, 72, 72, 16, True)]
+    entries = [OutlineEntry("Introduction", 1, printed_page=1)]
+    located, _ = locate_entries(entries, lines, snap_titles=True)
+    assert located[0].title == "1 Introduction"
+
+
+def test_snapping_leaves_an_exact_match_alone():
+    lines = [Line("2 Methods", 0, 72, 72, 16, True)]
+    entries = [OutlineEntry("2 Methods", 1, printed_page=1)]
+    located, _ = locate_entries(entries, lines, snap_titles=True)
+    assert located[0].title == "2 Methods"
+
+
+def test_snapping_never_truncates_a_longer_title():
+    """The line is a fragment of the entry; adopting it would lose text."""
+    lines = [Line("Results and", 0, 72, 72, 16, True)]
+    entries = [OutlineEntry("Results and Discussion", 1, printed_page=1)]
+    located, _ = locate_entries(entries, lines, snap_titles=True)
+    assert located[0].title == "Results and Discussion"
+
+
+def test_snapping_is_off_by_default():
+    """It measurably hurt on the fixed test set; see locate_entries docstring."""
+    lines = [Line("1 Introduction", 0, 72, 72, 16, True)]
+    entries = [OutlineEntry("Introduction", 1, printed_page=1)]
+    located, _ = locate_entries(entries, lines)
+    assert located[0].title == "Introduction"
+
+
+def test_unlocated_entry_keeps_its_title():
+    lines = [Line("Hello world", 0, 72, 72, 10, False)]
+    entries = [OutlineEntry("Missing Chapter", 1, printed_page=1)]
+    located, failures = locate_entries(entries, lines)
+    assert failures == 1
+    assert located[0].title == "Missing Chapter"

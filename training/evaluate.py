@@ -18,7 +18,6 @@ Usage:
 """
 import argparse
 import json
-import re
 import sys
 from pathlib import Path
 
@@ -28,27 +27,17 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import fitz
 
 from harvest import normalize_title
-from pdf_bookmarker import extractor, pipeline
+from pdf_bookmarker import extractor, locator, pipeline
 
 
-# A leading section label: a dotted sequence ("4.1", "2.2.2"), a number with a
-# trailing dot ("1."), or a bare one- or two-digit number ("1", "12") — each
-# followed by whitespace. Bare numbers are capped at two digits so a year in a
-# real title ("2026 Annual Report") is not mistaken for a section label, and the
-# required whitespace leaves "3D Reconstruction" alone.
-_SECTION_NUMBER = re.compile(r"^(\d+(\.\d+)+\.?|\d+\.|\d{1,2})\s+")
-
-
-def strip_section_numbers(title: str) -> str:
-    """Drop a leading section label from a heading title.
-
-    Gold entries come from PDFs' embedded bookmarks, which usually omit the
-    numbering that the printed heading shows — but only usually, so the same
-    section can appear as "Introduction" in one document and "1 Introduction"
-    in another. Comparing without it measures whether a model found the right
-    heading rather than which of two defensible conventions it copied.
-    """
-    return _SECTION_NUMBER.sub("", title.strip())
+# Gold entries come from PDFs' embedded bookmarks, which usually omit the
+# numbering that the printed heading shows — but only usually, so the same
+# section can appear as "Introduction" in one document and "1 Introduction" in
+# another. Comparing without it measures whether a model found the right
+# heading rather than which of two defensible conventions it copied. The
+# locator needs exactly the same rule to match an entry to its heading, so the
+# implementation lives in the package and is shared rather than duplicated.
+strip_section_numbers = locator.strip_section_numbers
 
 
 def match_entries(
