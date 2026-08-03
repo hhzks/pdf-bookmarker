@@ -86,6 +86,12 @@ def build(
                         # Augmentation is train-only; val/test stay real.
                         counts["synthetic-skipped-eval"] += 1
                         continue
+                    if record.get("silver") and split != "train":
+                        # Distilled labels are a teacher's output, not ground
+                        # truth. Scoring against them would measure agreement
+                        # with the teacher instead of correctness.
+                        counts["silver-skipped-eval"] += 1
+                        continue
                     handles[split].write(
                         json.dumps(to_sft(record), ensure_ascii=False) + "\n"
                     )
@@ -107,7 +113,8 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--train + --val must leave room for a test split")
 
     counts = build(args.records, args.out, args.train_frac, args.val_frac)
-    for name in ("train", "val", "test", "duplicates", "synthetic-skipped-eval"):
+    for name in ("train", "val", "test", "duplicates",
+                 "synthetic-skipped-eval", "silver-skipped-eval"):
         print(f"{name}: {counts.get(name, 0)}", file=sys.stderr)
     return 0 if counts.get("train") else 1
 
