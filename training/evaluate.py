@@ -137,7 +137,8 @@ def main(argv: list[str] | None = None) -> int:
     source.add_argument("--predictions", type=Path, help="JSONL of {sha256, entries}")
     parser.add_argument("--ignore-section-numbers", action="store_true",
                         help="match titles ignoring a leading section label "
-                        "(\"1. Introduction\" == \"Introduction\"). Gold comes from "
+                        "(\"1. Introduction\" == \"A.2 Introduction\" == \"Introduction\"). "
+                        "Gold comes from "
                         "embedded bookmarks, which usually strip the numbering the "
                         "printed heading shows, so the strict metric penalises a "
                         "model for copying the page faithfully")

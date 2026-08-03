@@ -9,12 +9,26 @@ from .toc_detector import is_toc_row
 _WS = re.compile(r"\s+")
 _PUNCT = re.compile(r"[^\w\s]")
 
-# A leading section label: a dotted sequence ("4.1", "2.2.2"), a number with a
-# trailing dot ("1."), or a bare one- or two-digit number ("1", "12"), each
-# followed by whitespace. Bare numbers are capped at two digits so a year in a
-# real title ("2026 Annual Report") is not mistaken for a label, and the
-# required whitespace leaves "3D Reconstruction" alone.
-_SECTION_NUMBER = re.compile(r"^(\d+(\.\d+)+\.?|\d+\.|\d{1,2})\s+")
+# A leading section label, followed by whitespace. Bare numbers are capped at
+# two digits so a year in a real title ("2026 Annual Report") is not mistaken
+# for a label, and the required whitespace leaves "3D Reconstruction" alone.
+#
+# Letter forms matter as much as digits: appendices number their sections
+# "A.2.1 Same-species contribution" while the embedded bookmark says just
+# "Same-species contribution". A single letter only counts as a label when
+# punctuated like one — followed by ".<digits>" or a bare dot — so "A Study of
+# Gravity" and "I Remember" keep their first word, and requiring exactly one
+# letter (or a run of roman numerals) leaves "Fig. 4 Overview" alone.
+_SECTION_NUMBER = re.compile(
+    r"^("
+    r"\d+(\.\d+)+\.?"        # 4.1   2.2.2   1.2.
+    r"|\d+\."                # 1.
+    r"|\d{1,2}"              # 1   12
+    r"|[A-Za-z](\.\d+)+\.?"  # A.3   A.2.1
+    r"|[IVXLivxl]{2,5}\."    # IV.   viii.
+    r"|[A-Za-z]\."           # B.
+    r")\s+"
+)
 
 
 def strip_section_numbers(title: str) -> str:
@@ -46,7 +60,7 @@ def locate_entries(
     reads the way the heading is actually printed instead of however the TOC
     row or the model happened to write it. Without it the outline mixes
     conventions within one document: on the 77-document test set it rewrites
-    69% of titles, which is how inconsistent the raw output is.
+    75% of titles, which is how inconsistent the raw output is.
 
     It only ever adopts a section-label difference — the two must be the same
     heading once labels are stripped — because a prefix match can otherwise
@@ -54,7 +68,7 @@ def locate_entries(
     Work") and rewrite the title outright.
 
     Cost is ~0.4 title F1 measured with evaluate.py --ignore-section-numbers
-    (0.6966 -> 0.6929 for v3). The strict metric drops far more, but only
+    (0.7037 -> 0.7000 for v3). The strict metric drops far more, but only
     because gold comes from embedded bookmarks that omit the numbering the page
     shows; that is a convention difference, not an accuracy one.
     """

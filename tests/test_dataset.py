@@ -189,6 +189,30 @@ def test_strip_section_numbers_normalizes_numbering():
     assert evaluate.strip_section_numbers("2026 Annual Report") == "2026 Annual Report"
 
 
+def test_strip_section_numbers_handles_appendix_labels():
+    """Appendices label sections with letters, not digits ("A.2.1 Method")."""
+    assert evaluate.strip_section_numbers("A.3 Integrability conditions") == (
+        "Integrability conditions"
+    )
+    assert evaluate.strip_section_numbers("A.2.1 Same-species contribution") == (
+        "Same-species contribution"
+    )
+    assert evaluate.strip_section_numbers("E.2 Reduced cycle") == "Reduced cycle"
+    assert evaluate.strip_section_numbers("B. Overview") == "Overview"
+    assert evaluate.strip_section_numbers("IV. Results") == "Results"
+    assert evaluate.strip_section_numbers("viii. Notes") == "Notes"
+
+
+def test_strip_section_numbers_keeps_words_that_look_like_labels():
+    """A single leading word is only a label when punctuated like one."""
+    # No dot: the letter is the first word of the title, not a label.
+    assert evaluate.strip_section_numbers("A Study of Gravity") == "A Study of Gravity"
+    assert evaluate.strip_section_numbers("I Remember") == "I Remember"
+    # Multi-letter words are never labels, even followed by a dot.
+    assert evaluate.strip_section_numbers("Fig. 4 Overview") == "Fig. 4 Overview"
+    assert evaluate.strip_section_numbers("No. 7 Reactor") == "No. 7 Reactor"
+
+
 def test_score_outline_counts_numbering_mismatch_as_a_miss_by_default():
     """Gold from embedded bookmarks often drops numbering the body text shows."""
     gold = [{"title": "Introduction", "level": 1, "printed_page": 3}]
