@@ -27,26 +27,46 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import fitz
 
 from harvest import normalize_title
-from pdf_bookmarker import extractor, pipeline
+from pdf_bookmarker import extractor, locator, pipeline
 
 
-def match_entries(pred: list[dict], gold: list[dict]) -> list[tuple[dict, dict]]:
+# Gold entries come from PDFs' embedded bookmarks, which usually omit the
+# numbering that the printed heading shows — but only usually, so the same
+# section can appear as "Introduction" in one document and "1 Introduction" in
+# another. Comparing without it measures whether a model found the right
+# heading rather than which of two defensible conventions it copied. The
+# locator needs exactly the same rule to match an entry to its heading, so the
+# implementation lives in the package and is shared rather than duplicated.
+strip_section_numbers = locator.strip_section_numbers
+
+
+def match_entries(
+    pred: list[dict], gold: list[dict], ignore_section_numbers: bool = False
+) -> list[tuple[dict, dict]]:
     """Greedy in-order matching on normalized titles; each side used once."""
+
+    def key(title: str) -> str:
+        return normalize_title(
+            strip_section_numbers(title) if ignore_section_numbers else title
+        )
+
     pairs = []
     used: set[int] = set()
     for g in gold:
-        target = normalize_title(g["title"])
+        target = key(g["title"])
         for i, p in enumerate(pred):
-            if i not in used and normalize_title(p["title"]) == target:
+            if i not in used and key(p["title"]) == target:
                 used.add(i)
                 pairs.append((p, g))
                 break
     return pairs
 
 
-def score_outline(pred: list[dict], gold: list[dict]) -> dict:
+def score_outline(
+    pred: list[dict], gold: list[dict], ignore_section_numbers: bool = False
+) -> dict:
     """Score one document. pred/gold: [{title, level, printed_page}, ...]."""
-    pairs = match_entries(pred, gold)
+    pairs = match_entries(pred, gold, ignore_section_numbers)
     matched = len(pairs)
     precision = matched / len(pred) if pred else 0.0
     recall = matched / len(gold) if gold else 0.0
@@ -77,7 +97,11 @@ def heuristic_predict(pdf_path: str) -> list[dict]:
     ]
 
 
-def evaluate(records: list[dict], predictions: dict[str, list[dict]]) -> dict:
+def evaluate(
+    records: list[dict],
+    predictions: dict[str, list[dict]],
+    ignore_section_numbers: bool = False,
+) -> dict:
     """Macro-average scores over records; skips records with no prediction."""
     scores = []
     skipped = 0
@@ -86,7 +110,9 @@ def evaluate(records: list[dict], predictions: dict[str, list[dict]]) -> dict:
         if pred is None:
             skipped += 1
             continue
-        scores.append(score_outline(pred, record["entries"]))
+        scores.append(
+            score_outline(pred, record["entries"], ignore_section_numbers)
+        )
 
     def avg(key):
         values = [s[key] for s in scores if s[key] is not None]
@@ -109,6 +135,13 @@ def main(argv: list[str] | None = None) -> int:
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--backend", choices=["heuristic"])
     source.add_argument("--predictions", type=Path, help="JSONL of {sha256, entries}")
+    parser.add_argument("--ignore-section-numbers", action="store_true",
+                        help="match titles ignoring a leading section label "
+                        "(\"1. Introduction\" == \"A.2 Introduction\" == \"Introduction\"). "
+                        "Gold comes from "
+                        "embedded bookmarks, which usually strip the numbering the "
+                        "printed heading shows, so the strict metric penalises a "
+                        "model for copying the page faithfully")
     args = parser.parse_args(argv)
 
     records = [json.loads(l) for l in args.records.read_text(encoding="utf-8").splitlines()]
@@ -129,7 +162,7 @@ def main(argv: list[str] | None = None) -> int:
             )
         }
 
-    result = evaluate(records, predictions)
+    result = evaluate(records, predictions, args.ignore_section_numbers)
     print(json.dumps(result, indent=2))
     return 0 if result["documents"] else 1
 

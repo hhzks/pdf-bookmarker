@@ -238,3 +238,38 @@ def test_llm_failure_with_llm_flag_errors(ghost_toc_pdf, monkeypatch, tmp_path, 
     rc = cli.main([str(ghost_toc_pdf), "--llm", "-o", str(tmp_path / "out.pdf")])
     assert rc == 1
     assert "LLM verification failed" in capsys.readouterr().err
+
+
+def _capture_pipeline(monkeypatch):
+    """Replace process_pdf with a recorder, returning the kwargs it received."""
+    captured = {}
+
+    def fake(input_path, output_path, **kwargs):
+        captured.update(kwargs)
+        from pdf_bookmarker import pipeline
+        return pipeline.PipelineResult([OutlineEntry("A", 1, page=0)], 1, False, False)
+
+    monkeypatch.setattr(cli.pipeline, "process_pdf", fake)
+    return captured
+
+
+def test_labeler_flag_reaches_the_pipeline(toc_pdf, monkeypatch, tmp_path):
+    captured = _capture_pipeline(monkeypatch)
+    rc = cli.main([str(toc_pdf), "-o", str(tmp_path / "o.pdf"),
+                   "--labeler", "model.joblib"])
+    assert rc == 0
+    assert str(captured["labeler_path"]) == "model.joblib"
+
+
+def test_llm_density_flag_reaches_the_pipeline(toc_pdf, monkeypatch, tmp_path):
+    captured = _capture_pipeline(monkeypatch)
+    rc = cli.main([str(toc_pdf), "-o", str(tmp_path / "o.pdf"), "--llm-density", "1.5"])
+    assert rc == 0
+    assert captured["llm_density"] == 1.5
+
+
+def test_llm_density_defaults_to_the_measured_threshold(toc_pdf, monkeypatch, tmp_path):
+    captured = _capture_pipeline(monkeypatch)
+    rc = cli.main([str(toc_pdf), "-o", str(tmp_path / "o.pdf")])
+    assert rc == 0
+    assert captured["llm_density"] == cli.llm.SPARSE_ENTRIES_PER_PAGE

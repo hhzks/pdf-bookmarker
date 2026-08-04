@@ -94,6 +94,53 @@ def test_build_synthetic_records_train_only(tmp_path):
     assert counts.get("duplicates", 0) == 0   # (sha, kind) key, not sha
 
 
+def test_build_silver_records_train_only(tmp_path):
+    """Distilled labels are teacher output, not ground truth: never eval on them."""
+    base = {
+        "context": "Candidate heading lines ...",
+        "file": "x.pdf",
+        "entries": [{"title": "Intro", "level": 1, "printed_page": None}],
+        "context_kind": "headings",
+        "silver": True,
+    }
+    shas = {
+        "train": "00000000" + "0" * 56,
+        "val": f"{850:08x}" + "0" * 56,
+        "test": f"{950:08x}" + "0" * 56,
+    }
+    for name, sha in shas.items():
+        assert build_dataset.split_of(sha, 0.8, 0.1) == name
+    records = tmp_path / "silver.jsonl"
+    with open(records, "w", encoding="utf-8") as f:
+        for sha in shas.values():
+            f.write(json.dumps({**base, "sha256": sha}) + "\n")
+
+    counts = build_dataset.build([records], tmp_path / "out", 0.8, 0.1)
+    assert counts["train"] == 1
+    assert counts.get("val", 0) == 0
+    assert counts.get("test", 0) == 0
+    assert counts["silver-skipped-eval"] == 2
+
+
+def test_build_keeps_gold_records_in_eval_splits(tmp_path):
+    """The silver rule must not touch harvested ground truth."""
+    base = {
+        "context": "Table of contents text: ...",
+        "file": "x.pdf",
+        "entries": [{"title": "Intro", "level": 1, "printed_page": 3}],
+        "context_kind": "toc",
+    }
+    records = tmp_path / "gold.jsonl"
+    with open(records, "w", encoding="utf-8") as f:
+        for sha in ("00000000" + "0" * 56, f"{950:08x}" + "0" * 56):
+            f.write(json.dumps({**base, "sha256": sha}) + "\n")
+
+    counts = build_dataset.build([records], tmp_path / "out", 0.8, 0.1)
+    assert counts["train"] == 1
+    assert counts["test"] == 1
+    assert counts.get("silver-skipped-eval", 0) == 0
+
+
 # --- evaluate ----------------------------------------------------------------
 
 GOLD = [
@@ -127,6 +174,70 @@ def test_score_outline_empty_prediction():
     scores = evaluate.score_outline([], GOLD)
     assert scores["f1"] == 0.0
     assert scores["level_accuracy"] is None
+
+
+# --- section-number-insensitive matching ------------------------------------
+
+def test_strip_section_numbers_normalizes_numbering():
+    assert evaluate.strip_section_numbers("1. Introduction") == "Introduction"
+    assert evaluate.strip_section_numbers("4.1 Overview") == "Overview"
+    assert evaluate.strip_section_numbers("2.2.2 Notation and Basics") == "Notation and Basics"
+    # Nothing to strip: left alone.
+    assert evaluate.strip_section_numbers("Introduction") == "Introduction"
+    # A number that is part of the title, not a section label, must survive.
+    assert evaluate.strip_section_numbers("3D Reconstruction") == "3D Reconstruction"
+    assert evaluate.strip_section_numbers("2026 Annual Report") == "2026 Annual Report"
+
+
+def test_strip_section_numbers_handles_appendix_labels():
+    """Appendices label sections with letters, not digits ("A.2.1 Method")."""
+    assert evaluate.strip_section_numbers("A.3 Integrability conditions") == (
+        "Integrability conditions"
+    )
+    assert evaluate.strip_section_numbers("A.2.1 Same-species contribution") == (
+        "Same-species contribution"
+    )
+    assert evaluate.strip_section_numbers("E.2 Reduced cycle") == "Reduced cycle"
+    assert evaluate.strip_section_numbers("B. Overview") == "Overview"
+    assert evaluate.strip_section_numbers("IV. Results") == "Results"
+    assert evaluate.strip_section_numbers("viii. Notes") == "Notes"
+
+
+def test_strip_section_numbers_keeps_words_that_look_like_labels():
+    """A single leading word is only a label when punctuated like one."""
+    # No dot: the letter is the first word of the title, not a label.
+    assert evaluate.strip_section_numbers("A Study of Gravity") == "A Study of Gravity"
+    assert evaluate.strip_section_numbers("I Remember") == "I Remember"
+    # Multi-letter words are never labels, even followed by a dot.
+    assert evaluate.strip_section_numbers("Fig. 4 Overview") == "Fig. 4 Overview"
+    assert evaluate.strip_section_numbers("No. 7 Reactor") == "No. 7 Reactor"
+
+
+def test_score_outline_counts_numbering_mismatch_as_a_miss_by_default():
+    """Gold from embedded bookmarks often drops numbering the body text shows."""
+    gold = [{"title": "Introduction", "level": 1, "printed_page": 3}]
+    pred = [{"title": "1. Introduction", "level": 1, "printed_page": 3}]
+    assert evaluate.score_outline(pred, gold)["f1"] == 0.0
+
+
+def test_score_outline_can_ignore_section_numbering():
+    gold = [{"title": "Introduction", "level": 1, "printed_page": 3}]
+    pred = [{"title": "1. Introduction", "level": 1, "printed_page": 3}]
+    scores = evaluate.score_outline(pred, gold, ignore_section_numbers=True)
+    assert scores["f1"] == 1.0
+    assert scores["level_accuracy"] == 1.0
+
+
+def test_ignoring_numbering_does_not_merge_distinct_sections():
+    """1.1 Overview and 4.2 Overview must not collapse into one match."""
+    gold = [
+        {"title": "1.1 Overview", "level": 2, "printed_page": 3},
+        {"title": "4.2 Overview", "level": 2, "printed_page": 9},
+    ]
+    pred = [{"title": "Overview", "level": 2, "printed_page": 3}]
+    scores = evaluate.score_outline(pred, gold, ignore_section_numbers=True)
+    assert scores["precision"] == 1.0
+    assert scores["recall"] == pytest.approx(1 / 2)
 
 
 def test_heuristic_baseline_on_fixture(harvest_records):

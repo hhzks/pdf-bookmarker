@@ -21,7 +21,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-DEFAULT_BASE_MODEL = "Qwen/Qwen2.5-1.5B-Instruct"
+DEFAULT_BASE_MODEL = "Qwen/Qwen3.5-2B"  # keep in sync with finetune.py
 LLAMA_CPP_REPO = "https://github.com/ggml-org/llama.cpp"
 
 

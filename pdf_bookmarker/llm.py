@@ -4,6 +4,7 @@ To add a provider: implement the LLMBackend protocol and register the class
 in _BACKENDS. Selection is via "provider:model-id" strings (e.g. --model).
 """
 import json
+import os
 from typing import Protocol
 
 from pydantic import BaseModel
@@ -105,8 +106,19 @@ class LocalBackend:
     schema, so the model cannot emit malformed JSON."""
 
     _N_CTX = 16384  # must cover prompt + generated outline
+    _N_CTX_ENV = "PDF_BOOKMARKER_LOCAL_N_CTX"
+    _N_GPU_LAYERS = 0  # llama.cpp's own default: CPU only
+    _N_GPU_LAYERS_ENV = "PDF_BOOKMARKER_LOCAL_N_GPU_LAYERS"
 
-    def __init__(self, model: str = "", api_key: str | None = None):
+    def __init__(
+        self,
+        model: str = "",
+        api_key: str | None = None,
+        n_ctx: int | None = None,
+        n_gpu_layers: int | None = None,
+        chat: bool = False,
+        no_think: bool = False,
+    ):
         # api_key is accepted for LLMBackend compatibility and ignored.
         if not model:
             raise ValueError(
@@ -120,19 +132,60 @@ class LocalBackend:
                 'llama-cpp-python is not installed; run pip install "pdf-bookmarker[local]"'
             ) from exc
 
+        self._chat = chat
+        self._no_think = no_think
         self._grammar = llama_cpp.LlamaGrammar.from_json_schema(
             json.dumps(Outline.model_json_schema())
         )
-        self._llm = llama_cpp.Llama(model_path=model, n_ctx=self._N_CTX, verbose=False)
+        self._llm = llama_cpp.Llama(
+            model_path=model,
+            n_ctx=self._int_option(n_ctx, cls_default=self._N_CTX, env=self._N_CTX_ENV),
+            n_gpu_layers=self._int_option(
+                n_gpu_layers, cls_default=self._N_GPU_LAYERS, env=self._N_GPU_LAYERS_ENV
+            ),
+            verbose=False,
+        )
+
+    @staticmethod
+    def _int_option(value: int | None, *, cls_default: int, env: str) -> int:
+        """Explicit kwarg wins, then the env var, then the shipped default.
+
+        The env vars exist because the CLI selects a model with a bare
+        "local:path" spec, which has nowhere to put tuning knobs — but a
+        teacher-sized model (see training/distill.py) needs different ones
+        than the 1.5B student these defaults were chosen for.
+        """
+        if value is not None:
+            return value
+        raw = os.environ.get(env)
+        if raw is None:
+            return cls_default
+        try:
+            return int(raw)
+        except ValueError:
+            raise ValueError(f"{env} must be an integer, not {raw!r}") from None
 
     def parse_outline(self, context: str) -> list[OutlineEntry]:
-        result = self._llm(
-            PROMPT.format(context=context),
-            max_tokens=4096,
-            temperature=0.0,
-            grammar=self._grammar,
-        )
-        outline = Outline.model_validate_json(result["choices"][0]["text"])
+        prompt = PROMPT.format(context=context)
+        if self._chat:
+            # An off-the-shelf instruct model expects its own chat template;
+            # the fine-tuned student instead expects the bare prompt it was
+            # trained on, so raw completion stays the default.
+            if self._no_think:
+                prompt += "\n\n/no_think"
+            result = self._llm.create_chat_completion(
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=4096,
+                temperature=0.0,
+                grammar=self._grammar,
+            )
+            text = result["choices"][0]["message"]["content"]
+        else:
+            result = self._llm(
+                prompt, max_tokens=4096, temperature=0.0, grammar=self._grammar
+            )
+            text = result["choices"][0]["text"]
+        outline = Outline.model_validate_json(text)
         return [
             OutlineEntry(title=item.title, level=item.level, printed_page=item.printed_page)
             for item in outline.entries
@@ -156,15 +209,61 @@ class UnknownProviderError(ValueError):
     """The provider part of a "provider:model-id" spec is not registered."""
 
 
-def get_backend(spec: str, api_key: str | None = None) -> LLMBackend:
-    """Resolve a "provider:model-id" spec (model part optional) to a backend."""
+def get_backend(spec: str, api_key: str | None = None, **options) -> LLMBackend:
+    """Resolve a "provider:model-id" spec (model part optional) to a backend.
+
+    Extra keyword options are passed to the backend constructor; they are
+    provider-specific (e.g. n_ctx for "local"), so an option the selected
+    backend does not accept is a TypeError.
+    """
     provider, _, model = spec.partition(":")
     if provider not in _BACKENDS:
         raise UnknownProviderError(
             f"Unknown LLM provider {provider!r}. Available: {', '.join(sorted(_BACKENDS))}"
         )
     backend_cls = _BACKENDS[provider]
-    return backend_cls(model, api_key=api_key) if model else backend_cls(api_key=api_key)
+    if model:
+        return backend_cls(model, api_key=api_key, **options)
+    return backend_cls(api_key=api_key, **options)
+
+
+# Entries per page below which a line-labeler outline is worth an LLM call.
+# Measured on the 76-document evaluation set: routing by this signal is
+# sublinear, so a fraction of the calls buys a disproportionate share of the
+# union's +4.3 title F1.
+#
+#   threshold   documents routed   title F1   gain
+#      0.00            0%           0.7685      —      (labeler alone)
+#      0.25            8%           0.7829   +0.0144
+#      0.50           45%           0.7983   +0.0298
+#      1.00           80%           0.8056   +0.0372
+#      1.50           99%           0.8120   +0.0435   (quality-maximising)
+#
+# 0.5 is a cost/quality choice, not the best-scoring one: it takes 70% of the
+# gain for 45% of the calls, which is what "auto" means here. Cross-fitting the
+# threshold for quality alone picks 1.50 — i.e. "call the LLM on everything".
+# Anyone who wants that should pass it, or just use --llm.
+SPARSE_ENTRIES_PER_PAGE = 0.5
+
+
+def is_sparse_outline(
+    detected: int, page_count: int, threshold: float = SPARSE_ENTRIES_PER_PAGE
+) -> bool:
+    """Decide whether a line-labeler outline needs the LLM too (auto mode).
+
+    Density, not the structural checks `is_low_confidence` applies: those were
+    tuned for the font heuristics and are actively misleading here. On labeler
+    outlines they fire on the documents that need the LLM *least* — 26% of the
+    corpus, gaining +0.039 F1 where they fire against +0.044 where they stay
+    silent — while density at a comparable budget (22% routed) gains more.
+
+    A sparse outline means the labeler found little, which is where the LLM
+    adds most. Per page rather than in total, so a 400-page book with 40
+    headings counts as sparse and an 8-page paper with 6 does not.
+    """
+    if detected == 0:
+        return True
+    return detected / max(page_count, 1) <= threshold
 
 
 def is_low_confidence(

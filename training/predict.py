@@ -22,7 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from pdf_bookmarker.llm import PROMPT, Outline
 
-DEFAULT_BASE_MODEL = "Qwen/Qwen2.5-1.5B-Instruct"
+DEFAULT_BASE_MODEL = "Qwen/Qwen3.5-2B"  # keep in sync with finetune.py
 
 
 def parse_generation(text: str) -> list[dict] | None:

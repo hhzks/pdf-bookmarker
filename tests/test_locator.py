@@ -65,3 +65,78 @@ def test_unfound_entry_without_hint_is_dropped():
     located, failures = locate_entries(entries, lines)
     assert located == []
     assert failures == 1
+
+
+# --- snapping titles to the text actually on the page -----------------------
+
+def test_locates_across_a_section_number_difference():
+    """An LLM or TOC row may drop the number the printed heading carries."""
+    lines = [
+        Line("1 Introduction", 0, 72, 72, 16, True),
+        Line("body text here", 0, 72, 100, 10, False),
+    ]
+    entries = [OutlineEntry("Introduction", 1, printed_page=1)]
+    located, failures = locate_entries(entries, lines)
+    assert failures == 0
+    assert located[0].page == 0          # found despite the numbering
+
+
+def test_snaps_title_to_the_matched_body_line_when_asked():
+    lines = [Line("1 Introduction", 0, 72, 72, 16, True)]
+    entries = [OutlineEntry("Introduction", 1, printed_page=1)]
+    located, _ = locate_entries(entries, lines, snap_titles=True)
+    assert located[0].title == "1 Introduction"
+
+
+def test_snapping_leaves_an_exact_match_alone():
+    lines = [Line("2 Methods", 0, 72, 72, 16, True)]
+    entries = [OutlineEntry("2 Methods", 1, printed_page=1)]
+    located, _ = locate_entries(entries, lines, snap_titles=True)
+    assert located[0].title == "2 Methods"
+
+
+def test_snapping_never_truncates_a_longer_title():
+    """The line is a fragment of the entry; adopting it would lose text."""
+    lines = [Line("Results and", 0, 72, 72, 16, True)]
+    entries = [OutlineEntry("Results and Discussion", 1, printed_page=1)]
+    located, _ = locate_entries(entries, lines, snap_titles=True)
+    assert located[0].title == "Results and Discussion"
+
+
+def test_snapping_is_on_by_default():
+    """Bookmarks should read the way the page prints the heading."""
+    lines = [Line("1 Introduction", 0, 72, 72, 16, True)]
+    entries = [OutlineEntry("Introduction", 1, printed_page=1)]
+    located, _ = locate_entries(entries, lines)
+    assert located[0].title == "1 Introduction"
+
+
+def test_snapping_can_be_turned_off():
+    lines = [Line("1 Introduction", 0, 72, 72, 16, True)]
+    entries = [OutlineEntry("Introduction", 1, printed_page=1)]
+    located, _ = locate_entries(entries, lines, snap_titles=False)
+    assert located[0].title == "Introduction"
+
+
+def test_unlocated_entry_keeps_its_title():
+    lines = [Line("Hello world", 0, 72, 72, 10, False)]
+    entries = [OutlineEntry("Missing Chapter", 1, printed_page=1)]
+    located, failures = locate_entries(entries, lines)
+    assert failures == 1
+    assert located[0].title == "Missing Chapter"
+
+
+def test_snapping_never_adopts_a_longer_different_heading():
+    """A prefix match can reach a much longer line; only numbering may differ."""
+    lines = [Line("Discussion of Results and Future Work", 0, 72, 72, 16, True)]
+    entries = [OutlineEntry("Discussion", 1, printed_page=1)]
+    located, _ = locate_entries(entries, lines, snap_titles=True)
+    assert located[0].page == 0            # the prefix rule still locates it
+    assert located[0].title == "Discussion"  # but the title must not balloon
+
+
+def test_snapping_adopts_only_a_numbering_difference():
+    lines = [Line("4.1 Overview", 0, 72, 72, 16, True)]
+    entries = [OutlineEntry("Overview", 1, printed_page=1)]
+    located, _ = locate_entries(entries, lines, snap_titles=True)
+    assert located[0].title == "4.1 Overview"

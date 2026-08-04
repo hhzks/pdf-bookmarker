@@ -21,6 +21,15 @@ def build_parser() -> argparse.ArgumentParser:
     mode.add_argument("--no-llm", action="store_true", help="never call the LLM")
     parser.add_argument("--model", default=llm.DEFAULT_MODEL_SPEC,
                         help="LLM backend as PROVIDER:MODEL_ID (default: %(default)s)")
+    parser.add_argument("--labeler", type=Path, default=None,
+                        help="path to a line-labeling model (see "
+                        "training/train_line_labeler.py --save-model); also "
+                        "settable via PDF_BOOKMARKER_LABELER")
+    parser.add_argument("--llm-density", type=float,
+                        default=llm.SPARSE_ENTRIES_PER_PAGE, metavar="N",
+                        help="in auto mode with a labeler, call the LLM when it "
+                        "found N headings per page or fewer (default: %(default)s; "
+                        "0 never escalates, ~1.5 escalates on nearly everything)")
     parser.add_argument("--ocr", choices=("auto", "force", "never"), default="auto",
                         help="OCR scanned PDFs: auto (when no text layer), force, "
                              "or never (default: %(default)s)")
@@ -46,6 +55,8 @@ def main(argv: list[str] | None = None) -> int:
             model_spec=args.model,
             replace_existing=args.force,
             ocr_mode=args.ocr,
+            labeler_path=args.labeler,
+            llm_density=args.llm_density,
         )
     except pipeline.ExistingBookmarksError:
         print("error: PDF already has bookmarks; use --force to replace them",
