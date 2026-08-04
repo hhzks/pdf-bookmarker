@@ -61,13 +61,101 @@ FEATURE_NAMES = [
     "ends_colon",
     "ends_period",      # prose ends in a full stop; headings rarely do
     "digit_frac",
+    # Local contrast. Everything above describes a line in isolation --
+    # size_ratio compares it to the *document's* body size, which cannot
+    # separate a heading from an equally large line inside a figure block. A
+    # heading is defined by its neighbourhood: bigger than what follows,
+    # whitespace above it, body text below. Worth +1.4 title F1 (0.7797 ->
+    # 0.7933, 32 documents better against 13, CI [+0.0018, +0.0246]).
+    "size_vs_next",      # the ratio that actually marks a heading
+    "size_vs_prev",
+    "size_vs_window",    # against the median of +/-5 lines, not the document
+    "gap_below",         # whitespace under, in ems
+    "gap_ratio",         # above against below: a heading hangs off its block
+    "next_bold",
+    "prev_bold",
+    "x_minus_next",      # indentation contrast with the line below
+    "next_size_ratio",   # is the following line body text?
+    "window_bold_frac",  # bold is meaningless inside an all-bold block
 ]
 
 _PAGE_HEIGHT = 792.0  # US Letter; only used to scale y into roughly [0, 1]
+_WINDOW = 5           # lines each side for the local median
 
 
-def feature_vector(row: dict, page_count: int) -> list[float]:
-    """Numeric features for one line. Order matches FEATURE_NAMES."""
+def _median(values: list[float]) -> float:
+    ordered = sorted(values)
+    middle = len(ordered) // 2
+    if not ordered:
+        return 0.0
+    if len(ordered) % 2:
+        return ordered[middle]
+    return (ordered[middle - 1] + ordered[middle]) / 2
+
+
+def _window_features(rows: list[dict]) -> list[list[float]]:
+    """Local contrast for each row. Pure Python on purpose.
+
+    numpy is only in the [labeler] extra, and this module is imported on the
+    heuristics-only path, so it must not depend on it.
+
+    Neighbours never cross a page break: the line under a heading is on the
+    same page, and the next page's first line is not adjacent to it in any
+    layout sense. Where there is no neighbour a feature falls back to the row
+    itself, which reads as "no contrast" rather than as a spurious jump.
+    """
+    sizes = [float(row.get("size") or 1.0) for row in rows]
+    bolds = [1.0 if row.get("bold") else 0.0 for row in rows]
+    out = []
+    for i, row in enumerate(rows):
+        size = sizes[i] or 1.0
+        page = row.get("page", 0)
+        has_next = i + 1 < len(rows) and rows[i + 1].get("page", 0) == page
+        has_prev = i > 0 and rows[i - 1].get("page", 0) == page
+        next_row = rows[i + 1] if has_next else row
+        prev_row = rows[i - 1] if has_prev else row
+        next_size = sizes[i + 1] if has_next else size
+        prev_size = sizes[i - 1] if has_prev else size
+
+        low, high = max(0, i - _WINDOW), min(len(rows), i + _WINDOW + 1)
+        local = _median(sizes[low:high]) or size
+        bold_frac = sum(bolds[low:high]) / (high - low) if high > low else 0.0
+
+        gap_above = float(row.get("gap_above", 0.0))
+        gap_below = float(next_row.get("gap_above", 0.0)) if has_next else 0.0
+        out.append([
+            size / (next_size or 1.0),
+            size / (prev_size or 1.0),
+            size / local,
+            gap_below / size,
+            gap_above / (gap_below if gap_below > 0.01 else 0.01),
+            bolds[i + 1] if has_next else 0.0,
+            bolds[i - 1] if has_prev else 0.0,
+            float(row.get("x", 0.0)) - float(next_row.get("x", 0.0)),
+            float(next_row.get("size_ratio", 1.0)) if has_next else 1.0,
+            bold_frac,
+        ])
+    return out
+
+
+def feature_matrix(rows: list[dict], page_count: int) -> list[list[float]]:
+    """Feature vectors for one document's rows, in order.
+
+    **The only supported way to featurize.** Ten of the features describe a
+    line's neighbourhood, so a caller that vectorized rows one at a time would
+    hand the model "no contrast" everywhere while the trainer saw real values.
+    That is the same class of train/serve skew that cost 1.3 title F1 when
+    serving used float64, which is why the per-row function is private.
+    """
+    windows = _window_features(rows)
+    return [
+        _feature_vector(row, page_count) + window
+        for row, window in zip(rows, windows)
+    ]
+
+
+def _feature_vector(row: dict, page_count: int) -> list[float]:
+    """The line's own features. Order matches the first part of FEATURE_NAMES."""
     text = row["text"]
     stripped = text.strip()
     size = row.get("size") or 1.0

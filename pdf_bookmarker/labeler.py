@@ -9,8 +9,8 @@ Measured on the 76-document evaluation set (`--ignore-section-numbers`):
 
     font heuristics   0.6205 title F1
     LLM (Qwen3.5-2B)  0.7642
-    this              0.7797   precision 0.8635, level accuracy 0.8879
-    this + the LLM    0.8104   see merge.merge_outlines
+    this              0.8009   precision 0.8802, level accuracy 0.8928
+    this + the LLM    see merge.merge_outlines
 
 The model is a pair of fitted scikit-learn estimators produced by
 `training/train_line_labeler.py --save-model`. scikit-learn and joblib are the
@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .extractor import Line
-from .line_labeler import FEATURE_NAMES, entries_from_labels, feature_vector, line_features
+from .line_labeler import FEATURE_NAMES, entries_from_labels, feature_matrix, line_features
 from .models import OutlineEntry
 
 _REQUIRED = ("detector", "leveler", "threshold", "feature_names")
@@ -100,7 +100,7 @@ class Labeler:
         rows = line_features(lines)
         if not rows:
             return []
-        X = self._matrix([feature_vector(row, page_count) for row in rows])
+        X = self._matrix(feature_matrix(rows, page_count))
         scores = self.detector.predict_proba(X)
         hits = [i for i, p in enumerate(scores) if p[1] >= self.threshold]
         if not hits:
