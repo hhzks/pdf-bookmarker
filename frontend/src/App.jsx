@@ -160,7 +160,7 @@ export default function App() {
                   className="linklike"
                   onClick={() => setShowKeyField(!showKeyField)}
                 >
-                  {showKeyField ? "Use the server's API key" : "Use my own API key"}
+                  {showKeyField ? "Use the built-in model" : "Use my own API key"}
                 </button>
                 {showKeyField && (
                   <>

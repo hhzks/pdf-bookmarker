@@ -3,6 +3,7 @@ import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -12,6 +13,7 @@ from pdf_bookmarker.pipeline import resolve_labeler
 
 from .jobs import JobStore
 from .ratelimit import RateLimiter
+from . import routes
 from .routes import router
 
 logger = logging.getLogger("pdf_bookmarker.web")
@@ -32,14 +34,18 @@ def create_app(
             if origin.strip()
         ]
 
-    labeler_status = _load_labeler()
+    startup_notes = [
+        (logging.INFO, _load_labeler()),
+        _check_verification_model(),
+    ]
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         # Logged here, not in create_app: that runs at import time, before
-        # uvicorn installs its logging config, and an INFO line emitted then
-        # goes nowhere.
-        logger.info(app.state.labeler_status)
+        # uvicorn installs its logging config, and anything emitted then goes
+        # nowhere.
+        for level, message in app.state.startup_notes:
+            logger.log(level, message)
         task = asyncio.create_task(_cleanup_loop(app))
         yield
         task.cancel()
@@ -49,7 +55,7 @@ def create_app(
             pass
 
     app = FastAPI(title="pdf-bookmarker", lifespan=lifespan)
-    app.state.labeler_status = labeler_status
+    app.state.startup_notes = startup_notes
     app.state.jobs = JobStore(ttl_seconds=ttl_seconds)
     app.state.limiter = RateLimiter(rate_limit_per_hour)
     if allowed_origins:
@@ -91,6 +97,28 @@ def _load_labeler() -> str:
             "will use TOC parsing and font heuristics"
         )
     return f"line labeler loaded from {os.environ.get('PDF_BOOKMARKER_LABELER')}"
+
+
+def _check_verification_model() -> tuple[int, str]:
+    """Report on the server's LLM, without loading it.
+
+    Only the file's existence is checked. Loading a multi-gigabyte GGUF here
+    would tie the web app to the [local] extra and delay every boot, and the
+    first job that needs it pays the load once anyway (llm.get_backend caches
+    it). Missing is a warning, not a failure: unlike the labeler this is a
+    shipped default rather than something an operator asked for, and auto mode
+    already degrades to the heuristic outline when the LLM cannot be built.
+    """
+    spec = routes.SERVER_MODEL_SPEC  # read now, not at import: tests and
+    provider, _, model = spec.partition(":")  # embedders can set it
+    if provider != "local":
+        return logging.INFO, f"verification model: {spec}"
+    if model and Path(model).is_file():
+        return logging.INFO, f"verification model: local GGUF at {model}"
+    return logging.WARNING, (
+        f"the configured verification model {model or '(no path)'} does not "
+        "exist; outlines will not be LLM-verified (set VERIFICATION_MODEL)"
+    )
 
 
 async def _cleanup_loop(app: FastAPI) -> None:

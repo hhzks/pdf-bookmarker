@@ -15,6 +15,7 @@ The result is what pdf_bookmarker's local backend consumes:
     pdf-bookmarker input.pdf --llm --model "local:models/outline.gguf"
 """
 import argparse
+import json
 import shutil
 import subprocess
 import sys
@@ -38,6 +39,29 @@ def merge_adapter(adapter_dir: Path, base_model: str, merged_dir: Path) -> None:
     model = model.merge_and_unload()
     model.save_pretrained(str(merged_dir))
     AutoTokenizer.from_pretrained(str(adapter_dir)).save_pretrained(str(merged_dir))
+
+
+def converter_flags(merged_dir: Path) -> list[str]:
+    """Extra converter arguments this merged checkpoint needs.
+
+    Qwen3.5 ships a multi-token-prediction layer for speculative decoding.
+    `AutoModelForCausalLM` loads the text model only, so `merge_and_unload`
+    writes 24 blocks of weights beside a config still claiming
+    `mtp_num_hidden_layers: 1`. The converter believes the config, writes
+    `block_count: 25`, and llama.cpp then refuses the file:
+
+        error loading model: missing tensor 'blk.24.attn_norm.weight'
+
+    `--no-mtp` tells the converter to export the text layers alone, which is
+    all that was merged and all that generation needs. Passed only when the
+    config declares such a layer: the flag is recent, and older converters
+    (fine for Qwen2.5-era exports) do not accept it.
+    """
+    config_path = merged_dir / "config.json"
+    if not config_path.exists():
+        return []
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    return ["--no-mtp"] if config.get("mtp_num_hidden_layers") else []
 
 
 def find_converter(llama_cpp_dir: Path | None, workdir: Path) -> Path:
@@ -86,7 +110,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"converting to GGUF ({args.outtype})...", file=sys.stderr)
         subprocess.run(
             [sys.executable, str(converter), str(merged_dir),
-             "--outfile", str(args.output), "--outtype", args.outtype],
+             "--outfile", str(args.output), "--outtype", args.outtype,
+             # Read after the branch above: a merged directory left by an
+             # earlier run needs these too, and that path skips the merge.
+             *converter_flags(merged_dir)],
             check=True,
         )
     finally:

@@ -10,7 +10,11 @@ VALID_MODES = {"auto", "always", "never"}
 
 # The server decides the verification model. Override at deploy time with the
 # VERIFICATION_MODEL env var (e.g. "anthropic:claude-opus-4-8") — no code change.
-SERVER_MODEL_SPEC = os.environ.get("VERIFICATION_MODEL", "gemini:gemini-3.5-flash")
+#
+# The default is the fine-tuned Qwen GGUF served through llama.cpp: no API key,
+# no per-document cost, and no upload leaving the machine. A cloud model is
+# still one env var away, and a caller who brings their own key may pick one.
+SERVER_MODEL_SPEC = os.environ.get("VERIFICATION_MODEL", "local:models/outline.gguf")
 
 # Bound OCR cost on the free tier: scanned PDFs longer than this are rejected.
 OCR_MAX_PAGES = int(os.environ.get("OCR_MAX_PAGES", "50"))

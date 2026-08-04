@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 from pdf_bookmarker.pipeline import NoTextLayerError
 
 from app import jobs as jobs_module
+from app import routes
 from app.main import create_app
 
 PDF_BYTES = b"%PDF-1.4 minimal test bytes"
@@ -97,20 +98,20 @@ def _first_call(fake_pipeline, timeout=10):
 def test_no_key_ignores_client_model(client, fake_pipeline):
     upload(client, llm_mode="always", model="anthropic:claude-opus-4-8")
     call = _first_call(fake_pipeline)
-    assert call["model_spec"] == "gemini:gemini-3.5-flash"
+    assert call["model_spec"] == routes.SERVER_MODEL_SPEC
     assert call["api_key"] is None
 
 
 def test_no_key_no_model_uses_server_model(client, fake_pipeline):
     upload(client, llm_mode="always")
     call = _first_call(fake_pipeline)
-    assert call["model_spec"] == "gemini:gemini-3.5-flash"
+    assert call["model_spec"] == routes.SERVER_MODEL_SPEC
 
 
 def test_key_without_model_falls_back_to_server_model(client, fake_pipeline):
     upload(client, llm_mode="always", api_key="user-secret")
     call = _first_call(fake_pipeline)
-    assert call["model_spec"] == "gemini:gemini-3.5-flash"
+    assert call["model_spec"] == routes.SERVER_MODEL_SPEC
     assert call["api_key"] == "user-secret"
 
 
@@ -250,3 +251,56 @@ def test_startup_logs_whether_the_labeler_is_active(monkeypatch, caplog):
         with TestClient(app):
             pass
     assert any("labeler" in record.message.lower() for record in caplog.records)
+
+
+def test_the_server_verifies_with_the_local_qwen(monkeypatch):
+    """No key leaves the machine and no per-document cost: the served model is
+    the fine-tuned Qwen GGUF, not a cloud API."""
+    import importlib
+
+    monkeypatch.delenv("VERIFICATION_MODEL", raising=False)
+    reloaded = importlib.reload(routes)
+    try:
+        assert reloaded.SERVER_MODEL_SPEC == "local:models/outline.gguf"
+    finally:
+        importlib.reload(routes)
+
+
+def test_the_deployment_can_override_the_verification_model(monkeypatch):
+    import importlib
+
+    monkeypatch.setenv("VERIFICATION_MODEL", "gemini:gemini-3.5-flash")
+    reloaded = importlib.reload(routes)
+    try:
+        assert reloaded.SERVER_MODEL_SPEC == "gemini:gemini-3.5-flash"
+    finally:
+        monkeypatch.delenv("VERIFICATION_MODEL", raising=False)
+        importlib.reload(routes)
+
+
+def test_a_missing_local_model_warns_but_starts(monkeypatch, caplog):
+    """Unlike the labeler, the LLM is optional by design: auto mode degrades to
+    the heuristic outline, so a missing file must not take the server down."""
+    import logging
+
+    monkeypatch.setattr(routes, "SERVER_MODEL_SPEC", "local:no/such/model.gguf")
+    app = create_app()
+    with caplog.at_level(logging.WARNING, logger="pdf_bookmarker.web"):
+        with TestClient(app):
+            pass
+    assert any("no/such/model.gguf" in record.message for record in caplog.records)
+
+
+def test_a_present_local_model_is_reported(monkeypatch, caplog, tmp_path):
+    import logging
+
+    model = tmp_path / "outline.gguf"
+    model.write_bytes(b"GGUF")
+    monkeypatch.setattr(routes, "SERVER_MODEL_SPEC", f"local:{model}")
+    app = create_app()
+    with caplog.at_level(logging.INFO, logger="pdf_bookmarker.web"):
+        with TestClient(app):
+            pass
+    assert any(str(model) in record.message for record in caplog.records)
+    warnings = [r.message for r in caplog.records if r.levelno >= logging.WARNING]
+    assert not any("verification model" in message for message in warnings)

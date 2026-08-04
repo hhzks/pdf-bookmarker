@@ -5,6 +5,7 @@ in _BACKENDS. Selection is via "provider:model-id" strings (e.g. --model).
 """
 import json
 import os
+import threading
 from typing import Protocol
 
 from pydantic import BaseModel
@@ -134,6 +135,11 @@ class LocalBackend:
 
         self._chat = chat
         self._no_think = no_think
+        # One generation at a time. The backend is cached and shared across the
+        # worker pool, and llama.cpp keeps state in the context — concurrent
+        # calls on one model corrupt each other. A single GPU would serialize
+        # them anyway.
+        self._lock = threading.Lock()
         self._grammar = llama_cpp.LlamaGrammar.from_json_schema(
             json.dumps(Outline.model_json_schema())
         )
@@ -167,24 +173,25 @@ class LocalBackend:
 
     def parse_outline(self, context: str) -> list[OutlineEntry]:
         prompt = PROMPT.format(context=context)
-        if self._chat:
-            # An off-the-shelf instruct model expects its own chat template;
-            # the fine-tuned student instead expects the bare prompt it was
-            # trained on, so raw completion stays the default.
-            if self._no_think:
-                prompt += "\n\n/no_think"
-            result = self._llm.create_chat_completion(
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=4096,
-                temperature=0.0,
-                grammar=self._grammar,
-            )
-            text = result["choices"][0]["message"]["content"]
-        else:
-            result = self._llm(
-                prompt, max_tokens=4096, temperature=0.0, grammar=self._grammar
-            )
-            text = result["choices"][0]["text"]
+        with self._lock:
+            if self._chat:
+                # An off-the-shelf instruct model expects its own chat template;
+                # the fine-tuned student instead expects the bare prompt it was
+                # trained on, so raw completion stays the default.
+                if self._no_think:
+                    prompt += "\n\n/no_think"
+                result = self._llm.create_chat_completion(
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=4096,
+                    temperature=0.0,
+                    grammar=self._grammar,
+                )
+                text = result["choices"][0]["message"]["content"]
+            else:
+                result = self._llm(
+                    prompt, max_tokens=4096, temperature=0.0, grammar=self._grammar
+                )
+                text = result["choices"][0]["text"]
         outline = Outline.model_validate_json(text)
         return [
             OutlineEntry(title=item.title, level=item.level, printed_page=item.printed_page)
@@ -221,10 +228,48 @@ def get_backend(spec: str, api_key: str | None = None, **options) -> LLMBackend:
         raise UnknownProviderError(
             f"Unknown LLM provider {provider!r}. Available: {', '.join(sorted(_BACKENDS))}"
         )
+    if provider == "local":
+        return _local_backend(model, options)
     backend_cls = _BACKENDS[provider]
     if model:
         return backend_cls(model, api_key=api_key, **options)
     return backend_cls(api_key=api_key, **options)
+
+
+# Last local model built, as ((path, mtime, size, options), backend).
+_CACHED_LOCAL: tuple[tuple, object] | None = None
+
+
+def _local_backend(model: str, options: dict):
+    """Build a local backend, reusing the last one when nothing has changed.
+
+    A GGUF is gigabytes and a server resolves a backend per job, so loading it
+    each time is not viable. Only this provider is cached: the others hold the
+    caller's API key, and that must not survive the call that supplied it.
+
+    Keyed on the file's mtime and size as well as its path, so replacing the
+    model on disk takes effect without a restart, and on the options because a
+    teacher-sized context must not be answered with the student's instance.
+    """
+    global _CACHED_LOCAL
+    try:
+        info = os.stat(model)
+    except OSError:
+        return LocalBackend(model, **options)  # missing: let the backend say so
+    key = (
+        model,
+        info.st_mtime_ns,
+        info.st_size,
+        tuple(sorted(options.items())),
+        os.environ.get(LocalBackend._N_CTX_ENV),
+        os.environ.get(LocalBackend._N_GPU_LAYERS_ENV),
+    )
+    cached = _CACHED_LOCAL
+    if cached is not None and cached[0] == key:
+        return cached[1]
+    backend = LocalBackend(model, **options)
+    _CACHED_LOCAL = (key, backend)
+    return backend
 
 
 # Entries per page below which a line-labeler outline is worth an LLM call.

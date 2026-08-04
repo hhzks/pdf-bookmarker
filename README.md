@@ -38,10 +38,21 @@ The Google Gemini backend needs the `gemini` extra and a key in
 ### Local model (no API key)
 
 A fine-tuned local model can replace the cloud LLM entirely — nothing leaves
-your machine:
+your machine, and there is no per-document cost:
 
     pip install -e ".[local]"     # llama-cpp-python, CPU is fine
     pdf-bookmarker input.pdf --llm --model "local:models/outline.gguf"
+
+This is what the web backend uses by default (`VERIFICATION_MODEL`). The
+shipped model is a QLoRA fine-tune of Qwen3.5-2B, quantized to q8_0 (~2 GB).
+It is loaded once and reused, and generation is serialized — llama.cpp keeps
+state in the context, so concurrent calls on one model would corrupt it.
+
+On a CUDA machine, offload it to the GPU (roughly 50s for a 130-page document
+here, versus minutes on CPU):
+
+    PDF_BOOKMARKER_LOCAL_N_GPU_LAYERS=-1     # -1 = every layer
+    PDF_BOOKMARKER_LOCAL_N_CTX=16384         # prompt + generated outline
 
 Generation is grammar-constrained to the outline JSON schema, so the model
 cannot produce malformed output. See `training/README.md` for how to build
@@ -133,13 +144,19 @@ Web UI lives in `frontend/` (React + Vite) with a FastAPI backend in `backend/`.
 |---|---|
 | `ALLOWED_ORIGINS` | comma-separated CORS allowlist; unset blocks other origins |
 | `PDF_BOOKMARKER_LABELER` | path to the heading model; unset means heuristics only |
-| `VERIFICATION_MODEL` | server-side LLM, default `gemini:gemini-3.5-flash` |
+| `VERIFICATION_MODEL` | server-side LLM, default `local:models/outline.gguf` |
+| `PDF_BOOKMARKER_LOCAL_N_GPU_LAYERS` | GPU offload for a local model (`-1` = all) |
 | `OCR_MAX_PAGES` | reject scanned PDFs longer than this (default 50) |
 
 The labeler is loaded and validated once at startup: a path that cannot be used
 stops the server there, rather than failing every upload with a message about a
 model the user never asked for. Replacing the file on disk is picked up without
 a restart.
+
+The verification model is only *checked* at startup, not loaded — a missing
+file is logged as a warning and the server still starts, because auto mode
+degrades to the heuristic outline rather than failing the job. A caller who
+supplies their own API key may still select a cloud model per request.
 
     # in a second terminal
     cd frontend
