@@ -73,7 +73,7 @@ from build_line_dataset import MASK
 from pdf_bookmarker.line_labeler import (
     FEATURE_NAMES,
     entries_from_labels,
-    feature_vector,
+    feature_matrix,
     text_for_model,
 )
 
@@ -105,8 +105,11 @@ def load(path: Path, test_shas: set[str] | None, train_frac: float, val_frac: fl
                 # Drop MASK rows: headings that could not be tied to a specific
                 # bookmark. Keeping them would train the model to call a real
                 # heading a negative.
-                for row, vector in zip(rows, (feature_vector(r, doc["page_count"])
-                                              for r in rows)):
+                # Featurize the whole document, then drop MASK rows: the
+                # window features read each line's neighbours, and filtering
+                # first would compute them over a document production never
+                # sees.
+                for row, vector in zip(rows, feature_matrix(rows, doc["page_count"])):
                     if row["label"] == MASK:
                         continue
                     splits[split]["X"].append(vector)
@@ -304,9 +307,7 @@ def main(argv: list[str] | None = None) -> int:
     with open(args.output, "w", encoding="utf-8") as out:
         for doc in test_docs:
             rows = doc["lines"]
-            X = np.asarray(
-                [feature_vector(r, doc["page_count"]) for r in rows], dtype=np.float32
-            )
+            X = np.asarray(feature_matrix(rows, doc["page_count"]), dtype=np.float32)
             if text_model is not None:
                 texts = [text_for_model(r["text"]) for r in rows]
                 X = with_text(
