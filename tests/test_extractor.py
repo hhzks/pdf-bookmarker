@@ -1,5 +1,6 @@
 import fitz
 
+from pdf_bookmarker import extractor
 from pdf_bookmarker.extractor import _parse_fragment, extract_lines, has_text_layer
 
 
@@ -77,3 +78,51 @@ def test_fragment_normalizes_ligatures():
         "spans": [_span("satisﬁable")],
     }
     assert _parse_fragment(raw_line).text == "satisfiable"
+
+
+def _pdf_with_an_image():
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((72, 100), "Chapter 1", fontsize=16, fontname="hebo")
+    pixmap = fitz.Pixmap(fitz.csRGB, fitz.IRect(0, 0, 64, 64))
+    pixmap.set_rect(pixmap.irect, (200, 30, 30))
+    page.insert_image(fitz.Rect(72, 200, 136, 264), pixmap=pixmap)
+    return doc
+
+
+def test_images_are_never_decoded(monkeypatch):
+    """Ask PyMuPDF for text without images: we discard them anyway.
+
+    lines_from_blocks drops every non-text block, so decoding them is pure
+    latency -- and it is not a small amount. Extraction is ~88% of the labeler
+    path's runtime and image decoding is ~70% of that; over the 76-document
+    evaluation set, skipping it ran 2.81x faster (39.6s -> 14.1s, worst
+    document 14.0s -> 0.35s) for a byte-identical outline.
+    """
+    seen = []
+    original = extractor.lines_from_blocks
+
+    def spy(blocks, page_index):
+        seen.extend(blocks)
+        return original(blocks, page_index)
+
+    monkeypatch.setattr(extractor, "lines_from_blocks", spy)
+    lines = extract_lines(_pdf_with_an_image())
+
+    assert [l.text for l in lines] == ["Chapter 1"]  # the text still arrives
+    assert seen, "no blocks reached lines_from_blocks"
+    assert [b for b in seen if b.get("type") == 0], "no text block reached it"
+    assert not [b for b in seen if b.get("type") != 0], (
+        "an image block was decoded and handed over just to be discarded"
+    )
+
+
+def test_text_flags_drop_images_and_nothing_else():
+    """Only the image bit may differ from PyMuPDF's default for "dict".
+
+    TEXT_PRESERVE_WHITESPACE is load-bearing: LaTeX emits inter-word spaces as
+    whitespace-only spans and _parse_fragment joins all spans to recover them
+    (see test_fragment_keeps_space_only_spans). Turning flags off wholesale to
+    "go faster" would run those words together.
+    """
+    assert extractor._TEXT_FLAGS == fitz.TEXTFLAGS_DICT & ~fitz.TEXT_PRESERVE_IMAGES

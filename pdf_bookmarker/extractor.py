@@ -8,6 +8,18 @@ _BOLD_FLAG = 16     # bit 4 of the span flags
 _BASELINE_TOL = 2.0  # fragments this close vertically sit on one visual line
 _WIDE_GAP_EMS = 2.0  # horizontal gap (in ems) marking a layout break, e.g. TOC page numbers
 
+# PyMuPDF's default for "dict" preserves image blocks, decoding every one of
+# them; lines_from_blocks then throws them all away. Extraction is ~88% of the
+# labeler path's runtime and that decoding is ~70% of it, so dropping the bit
+# ran the 76-document evaluation set 2.81x faster (39.6s -> 14.1s, worst
+# document 14.0s -> 0.35s) for an identical outline -- title F1 0.7797 either
+# way, to six decimals.
+#
+# Only the image bit goes. TEXT_PRESERVE_WHITESPACE especially has to stay:
+# LaTeX emits inter-word spaces as whitespace-only spans, and _parse_fragment
+# joins all spans to recover them.
+_TEXT_FLAGS = fitz.TEXTFLAGS_DICT & ~fitz.TEXT_PRESERVE_IMAGES
+
 
 @dataclass
 class Line:
@@ -47,7 +59,7 @@ def extract_lines(doc: fitz.Document) -> list[Line]:
     """
     lines: list[Line] = []
     for page_index, page in enumerate(doc):
-        blocks = page.get_text("dict")["blocks"]
+        blocks = page.get_text("dict", flags=_TEXT_FLAGS)["blocks"]
         lines.extend(lines_from_blocks(blocks, page_index))
     return lines
 
