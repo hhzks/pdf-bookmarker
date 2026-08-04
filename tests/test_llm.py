@@ -413,3 +413,110 @@ def test_local_backend_no_think_off_by_default(monkeypatch):
     llm.get_backend(r"local:models\teacher.gguf", chat=True).parse_outline("x")
     (message,) = captured["messages"]
     assert "/no_think" not in message["content"]
+
+
+# --- the local model is loaded once, not per job ------------------------------
+
+@pytest.fixture
+def clean_backend_cache(monkeypatch):
+    monkeypatch.setattr(llm, "_CACHED_LOCAL", None, raising=False)
+
+
+def _counting_llama_cpp(monkeypatch, on_call=None):
+    """Fake llama_cpp whose Llama records every construction."""
+    loads = []
+
+    class FakeLlama:
+        def __init__(self, model_path, **kwargs):
+            loads.append((model_path, kwargs))
+
+        def __call__(self, prompt, **kwargs):
+            if on_call is not None:
+                on_call()
+            return {"choices": [{"text": '{"entries": []}'}]}
+
+    fake = ModuleType("llama_cpp")
+    fake.Llama = FakeLlama
+    fake.LlamaGrammar = SimpleNamespace(from_json_schema=lambda schema: ("g", schema))
+    monkeypatch.setitem(sys.modules, "llama_cpp", fake)
+    return loads
+
+
+def _gguf(tmp_path, name="outline.gguf", body=b"gguf"):
+    path = tmp_path / name
+    path.write_bytes(body)
+    return path
+
+
+def test_the_local_model_is_loaded_once_for_one_spec(tmp_path, monkeypatch, clean_backend_cache):
+    """The worker resolves a backend per job; reloading a GGUF each time is not viable."""
+    loads = _counting_llama_cpp(monkeypatch)
+    path = _gguf(tmp_path)
+    llm.get_backend(f"local:{path}")
+    llm.get_backend(f"local:{path}")
+    assert len(loads) == 1
+
+
+def test_a_second_gguf_is_loaded_separately(tmp_path, monkeypatch, clean_backend_cache):
+    loads = _counting_llama_cpp(monkeypatch)
+    llm.get_backend(f"local:{_gguf(tmp_path, 'a.gguf')}")
+    llm.get_backend(f"local:{_gguf(tmp_path, 'b.gguf')}")
+    assert len(loads) == 2
+
+
+def test_a_replaced_gguf_is_reloaded(tmp_path, monkeypatch, clean_backend_cache):
+    loads = _counting_llama_cpp(monkeypatch)
+    path = _gguf(tmp_path)
+    llm.get_backend(f"local:{path}")
+    path.write_bytes(b"a different, longer model")
+    llm.get_backend(f"local:{path}")
+    assert len(loads) == 2
+
+
+def test_different_options_are_not_served_from_the_cache(tmp_path, monkeypatch, clean_backend_cache):
+    """A teacher-sized context must not be answered with the student's instance."""
+    loads = _counting_llama_cpp(monkeypatch)
+    path = _gguf(tmp_path)
+    llm.get_backend(f"local:{path}", n_ctx=4096)
+    llm.get_backend(f"local:{path}", n_ctx=16384)
+    assert len(loads) == 2
+
+
+def test_keyed_backends_are_never_cached(monkeypatch):
+    """The caller's API key must not survive between jobs — not even in a cache."""
+    made = []
+
+    class FakeClient:
+        def __init__(self, api_key=None):
+            made.append(api_key)
+            self.messages = None
+
+    monkeypatch.setattr("anthropic.Anthropic", FakeClient)
+    llm.get_backend("anthropic:claude-opus-4-8", api_key="first-key")
+    llm.get_backend("anthropic:claude-opus-4-8", api_key="second-key")
+    assert made == ["first-key", "second-key"]
+
+
+def test_generation_on_a_shared_model_is_serialized(tmp_path, monkeypatch, clean_backend_cache):
+    """Two workers share one cached model; llama.cpp state is not reentrant."""
+    import threading
+    import time
+
+    active, peak = [], []
+
+    def on_call():
+        active.append(1)
+        peak.append(len(active))
+        time.sleep(0.05)
+        active.pop()
+
+    _counting_llama_cpp(monkeypatch, on_call=on_call)
+    backend = llm.get_backend(f"local:{_gguf(tmp_path)}")
+    threads = [
+        threading.Thread(target=backend.parse_outline, args=("ctx",)) for _ in range(4)
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert max(peak) == 1

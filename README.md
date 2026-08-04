@@ -38,10 +38,21 @@ The Google Gemini backend needs the `gemini` extra and a key in
 ### Local model (no API key)
 
 A fine-tuned local model can replace the cloud LLM entirely — nothing leaves
-your machine:
+your machine, and there is no per-document cost:
 
     pip install -e ".[local]"     # llama-cpp-python, CPU is fine
     pdf-bookmarker input.pdf --llm --model "local:models/outline.gguf"
+
+This is what the web backend uses by default (`VERIFICATION_MODEL`). The
+shipped model is a QLoRA fine-tune of Qwen3.5-2B, quantized to q8_0 (~2 GB).
+It is loaded once and reused, and generation is serialized — llama.cpp keeps
+state in the context, so concurrent calls on one model would corrupt it.
+
+On a CUDA machine, offload it to the GPU (roughly 50s for a 130-page document
+here, versus minutes on CPU):
+
+    PDF_BOOKMARKER_LOCAL_N_GPU_LAYERS=-1     # -1 = every layer
+    PDF_BOOKMARKER_LOCAL_N_CTX=16384         # prompt + generated outline
 
 Generation is grammar-constrained to the outline JSON schema, so the model
 cannot produce malformed output. See `training/README.md` for how to build
@@ -70,12 +81,17 @@ Or point `PDF_BOOKMARKER_LABELER` at it once and drop the flag. Measured over
 | font heuristics (default install) | 0.6205 |
 | LLM alone | 0.7642 |
 | `--labeler` | 0.7685 |
-| `--labeler` + auto mode | 0.8055 |
+| `--labeler` + auto mode | 0.7978 |
 | `--labeler --llm` | 0.8187 |
 
 The two detectors miss different headings — the model cannot name a heading
 that is not a line of text, the LLM reconstructs wrapped and merged ones — so
 the outlines are merged rather than one replacing the other.
+
+The auto row is end-to-end with the shipped GGUF; the last row replayed the
+same model's predictions over every document. Paired per document, the GGUF
+and the 4-bit adapter it was merged from are indistinguishable (6 wins, 8
+losses, 62 ties; 95% CI on the difference [−0.023, +0.004]).
 
 With a labeler configured, auto mode calls the LLM when the model found
 **0.5 headings per page or fewer**, which is where it adds most: that routes
@@ -133,13 +149,19 @@ Web UI lives in `frontend/` (React + Vite) with a FastAPI backend in `backend/`.
 |---|---|
 | `ALLOWED_ORIGINS` | comma-separated CORS allowlist; unset blocks other origins |
 | `PDF_BOOKMARKER_LABELER` | path to the heading model; unset means heuristics only |
-| `VERIFICATION_MODEL` | server-side LLM, default `gemini:gemini-3.5-flash` |
+| `VERIFICATION_MODEL` | server-side LLM, default `local:models/outline.gguf` |
+| `PDF_BOOKMARKER_LOCAL_N_GPU_LAYERS` | GPU offload for a local model (`-1` = all) |
 | `OCR_MAX_PAGES` | reject scanned PDFs longer than this (default 50) |
 
 The labeler is loaded and validated once at startup: a path that cannot be used
 stops the server there, rather than failing every upload with a message about a
 model the user never asked for. Replacing the file on disk is picked up without
 a restart.
+
+The verification model is only *checked* at startup, not loaded — a missing
+file is logged as a warning and the server still starts, because auto mode
+degrades to the heuristic outline rather than failing the job. A caller who
+supplies their own API key may still select a cloud model per request.
 
     # in a second terminal
     cd frontend
