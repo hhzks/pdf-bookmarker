@@ -5,7 +5,17 @@ from pathlib import Path
 
 import fitz
 
-from . import extractor, heading_detector, llm, locator, ocr, toc_detector, writer
+from . import (
+    extractor,
+    heading_detector,
+    labeler as labeler_module,
+    llm,
+    locator,
+    merge,
+    ocr,
+    toc_detector,
+    writer,
+)
 from .extractor import Line
 from .models import OutlineEntry
 
@@ -61,6 +71,7 @@ class PipelineResult:
     used_toc: bool
     used_ocr: bool = False
     warnings: list[str] = field(default_factory=list)
+    used_labeler: bool = False  # appended last: callers construct positionally
 
 
 def process_pdf(
@@ -73,6 +84,7 @@ def process_pdf(
     replace_existing: bool = True,
     ocr_mode: str = "auto",  # "auto" | "force" | "never"
     ocr_max_pages: int | None = None,
+    labeler_path: str | Path | None = None,
 ) -> PipelineResult:
     """Detect an outline in input_path and write it to output_path.
 
@@ -118,7 +130,23 @@ def process_pdf(
             if not lines:
                 raise NoTextLayerError(_NO_TEXT_MESSAGE)
             used_ocr = False
-        entries, failures, used_toc, toc_pages = build_outline(lines, doc.page_count)
+        model = resolve_labeler(labeler_path)
+        used_labeler = False
+        entries = []
+        if model is not None:
+            # The labeler beats the heuristic path outright (0.7671 vs 0.6205
+            # title F1) and its entries already carry an exact physical page,
+            # so there is nothing for the locator to do and no TOC to parse.
+            toc_pages = toc_detector.find_toc_pages(lines, doc.page_count)
+            entries = model.detect(lines, doc.page_count)
+            failures, used_toc, used_labeler = 0, False, True
+        if not entries:
+            # Nothing detected — either no labeler, or one that found nothing on
+            # this document. Falling through to the heuristics is strictly
+            # better than returning no outline at all, which is what a
+            # confident-but-silent labeler would otherwise cause.
+            entries, failures, used_toc, toc_pages = build_outline(lines, doc.page_count)
+            used_labeler = False
 
         used_llm = False
         run_llm, warning = decide_llm(
@@ -130,9 +158,21 @@ def process_pdf(
             try:
                 backend = llm.get_backend(model_spec, api_key=api_key)
                 llm_entries = backend.parse_outline(build_llm_context(lines, toc_pages))
-                entries, failures = locator.locate_entries(
+                located, failures = locator.locate_entries(
                     llm_entries, lines, skip_pages=set(toc_pages)
                 )
+                if used_labeler:
+                    # Two precise detectors that overlap on only 63% of titles:
+                    # the union is worth +4.3 title F1 (0.7671 -> 0.8104), almost
+                    # all recall. The labeler leads because its pages are exact.
+                    #
+                    # This merge is deliberately NOT applied to the heuristic
+                    # outline. Merging that in instead costs 6.1 F1, because its
+                    # precision (0.606) drags the result down -- the union needs
+                    # both sources to be precise.
+                    entries = merge.merge_outlines(entries, located)
+                else:
+                    entries = located
                 used_llm = True
             except llm.UnknownProviderError:
                 raise
@@ -147,9 +187,33 @@ def process_pdf(
         count = 0
         if output_path is not None:
             count = writer.write_outline(doc, entries, str(output_path))
-        return PipelineResult(entries, count, used_llm, used_toc, used_ocr, warnings)
+        return PipelineResult(
+            entries,
+            count,
+            used_llm,
+            used_toc,
+            used_ocr,
+            warnings=warnings,
+            used_labeler=used_labeler,
+        )
     finally:
         doc.close()
+
+
+_LABELER_ENV = "PDF_BOOKMARKER_LABELER"
+
+
+def resolve_labeler(labeler_path: str | Path | None):
+    """Load the line-labeling detector, or None when none is configured.
+
+    Off unless asked for: an install with no model behaves exactly as before.
+    The env var exists so a deployment can enable it without every caller
+    threading a path through.
+    """
+    path = labeler_path or os.environ.get(_LABELER_ENV)
+    if not path:
+        return None
+    return labeler_module.Labeler.load(path)
 
 
 def build_outline(

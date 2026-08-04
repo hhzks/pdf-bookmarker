@@ -53,7 +53,7 @@ import numpy as np
 
 from build_dataset import split_of
 from build_line_dataset import MASK
-from line_labeler import (
+from pdf_bookmarker.line_labeler import (
     FEATURE_NAMES,
     entries_from_labels,
     feature_vector,
@@ -174,6 +174,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--train", type=float, default=0.8, dest="train_frac")
     parser.add_argument("--val", type=float, default=0.1, dest="val_frac")
     parser.add_argument("--max-iter", type=int, default=300)
+    parser.add_argument("--save-model", type=Path,
+                        help="write a bundle loadable by "
+                        "pdf_bookmarker.labeler.Labeler.load")
     parser.add_argument("--text", action="store_true",
                         help="add a lexical score over the line text as a "
                         "feature (default: layout only, the control)")
@@ -230,6 +233,31 @@ def main(argv: list[str] | None = None) -> int:
         max_iter=args.max_iter, class_weight="balanced", random_state=0
     )
     leveler.fit(train["X"][positive], train["y"][positive])
+
+    if args.save_model:
+        import joblib
+        import sklearn
+
+        if text_model is not None:
+            # The serving path has no lexical stage, and shipping a model whose
+            # 14th column would silently be absent is worse than refusing.
+            print("--save-model cannot be combined with --text: the serving "
+                  "path has no lexical stage", file=sys.stderr)
+            return 1
+        joblib.dump(
+            {
+                "detector": detector,
+                "leveler": leveler,
+                "threshold": threshold,
+                "feature_names": list(FEATURE_NAMES),
+                "sklearn_version": sklearn.__version__,
+                "train_rows": int(len(train["y"])),
+            },
+            args.save_model,
+            compress=3,
+        )
+        size = args.save_model.stat().st_size / 1e6
+        print(f"saved model to {args.save_model} ({size:.1f} MB)", file=sys.stderr)
 
     print(f"predicting {len(test_docs)} test documents...", file=sys.stderr)
     counts: Counter[str] = Counter()

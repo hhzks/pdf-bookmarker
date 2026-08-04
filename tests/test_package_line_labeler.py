@@ -1,10 +1,5 @@
-"""Tests for training/line_labeler.py."""
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "training"))
-
-import line_labeler as ll
+"""Tests for pdf_bookmarker/line_labeler.py."""
+from pdf_bookmarker import line_labeler as ll
 
 
 def row(text="Body text", label=0, **kw):

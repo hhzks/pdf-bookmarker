@@ -1,8 +1,9 @@
 """Featurization and outline assembly for the line-labeling outline model.
 
-Shared by the trainer and the predictor so that the features a model was fit
-on are exactly the features it is served — the same "train == serve" property
-that build_dataset.py gives the generative path.
+Lives in the package, not in training/, because the trainer and the serving
+path must compute features from one implementation — the same "train == serve"
+property that build_dataset.py gives the generative path. training/ imports
+these; nothing here imports training/.
 
 The features are deliberately layout-first: relative font size, weight,
 indentation, whitespace above, and the shape of any leading section label.
@@ -12,6 +13,9 @@ handled separately (by an encoder over the line text); keeping the two apart
 makes it measurable how much each contributes.
 """
 import re
+
+from .extractor import Line
+from .heading_detector import body_text_size
 
 _NUMBERED = re.compile(r"^(\d+(\.\d+)*|[A-Za-z](\.\d+)+|[IVXLivxl]{1,5})[.\s]\s*\S")
 _ALL_CAPS = re.compile(r"^[^a-z]*[A-Z][^a-z]*$")
@@ -69,6 +73,36 @@ def feature_vector(row: dict, page_count: int) -> list[float]:
     ]
 
 
+def line_features(lines: list[Line]) -> list[dict]:
+    """Per-line feature rows, parallel to lines.
+
+    Sizes are expressed relative to the document's dominant body size so the
+    model sees "twice body text" rather than "20pt", which is what actually
+    distinguishes a heading across documents typeset at different scales.
+    """
+    if not lines:
+        return []
+    body = body_text_size(lines) or 1.0
+    rows = []
+    for i, line in enumerate(lines):
+        previous = lines[i - 1] if i else None
+        same_page = previous is not None and previous.page == line.page
+        rows.append(
+            {
+                "text": line.text,
+                "page": line.page,
+                "x": round(line.x, 2),
+                "y": round(line.y, 2),
+                "size": round(line.size, 2),
+                "bold": line.bold,
+                "size_ratio": round(line.size / body, 4),
+                "gap_above": round(line.y - previous.y, 2) if same_page else 0.0,
+                "words": len(line.text.split()),
+            }
+        )
+    return rows
+
+
 def entries_from_labels(rows: list[dict], labels: list[int]) -> list[dict]:
     """Read an outline off per-line labels, in document order.
 
@@ -78,11 +112,18 @@ def entries_from_labels(rows: list[dict], labels: list[int]) -> list[dict]:
     path has to recover it through the locator.
     """
     entries = []
-    for row, label in zip(rows, labels):
+    for index, (row, label) in enumerate(zip(rows, labels)):
         if not label:
             continue
         title = row["text"].strip()
         if not title:
             continue
-        entries.append({"title": title, "level": int(label), "page": row["page"]})
+        # `index` lets a caller recover the row this came from without
+        # reproducing the filtering above and drifting out of step with it.
+        entries.append({
+            "title": title,
+            "level": int(label),
+            "page": row["page"],
+            "index": index,
+        })
     return entries

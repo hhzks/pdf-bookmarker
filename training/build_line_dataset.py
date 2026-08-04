@@ -42,7 +42,7 @@ import fitz
 
 from pdf_bookmarker import extractor
 from pdf_bookmarker.extractor import Line
-from pdf_bookmarker.heading_detector import body_text_size
+from pdf_bookmarker.line_labeler import line_features
 from pdf_bookmarker.locator import strip_section_numbers
 from pdf_bookmarker.toc_detector import find_toc_pages, is_toc_row
 
@@ -191,36 +191,6 @@ def _find(
                 if labels[i] == 0 and keys[i] == target:
                     return i
     return None
-
-
-def line_features(lines: list[Line]) -> list[dict]:
-    """Per-line features, parallel to lines.
-
-    Sizes are expressed relative to the document's dominant body size so the
-    model sees "twice body text" rather than "20pt", which is what actually
-    distinguishes a heading across documents typeset at different scales.
-    """
-    if not lines:
-        return []
-    body = body_text_size(lines) or 1.0
-    rows = []
-    for i, line in enumerate(lines):
-        previous = lines[i - 1] if i else None
-        same_page = previous is not None and previous.page == line.page
-        rows.append(
-            {
-                "text": line.text,
-                "page": line.page,
-                "x": round(line.x, 2),
-                "y": round(line.y, 2),
-                "size": round(line.size, 2),
-                "bold": line.bold,
-                "size_ratio": round(line.size / body, 4),
-                "gap_above": round(line.y - previous.y, 2) if same_page else 0.0,
-                "words": len(line.text.split()),
-            }
-        )
-    return rows
 
 
 def build_document(path: Path | str, max_level: int = _MAX_LEVEL) -> tuple[dict | None, str | None]:
