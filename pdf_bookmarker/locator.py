@@ -31,6 +31,18 @@ _SECTION_NUMBER = re.compile(
 )
 
 
+def section_label(title: str) -> str:
+    """The leading section label, or "" — "4.1 Results" -> "4.1".
+
+    Public because featurization needs the label itself, not just the title
+    without it: how deep the numbering goes ("4" vs "4.1.2") is evidence about
+    whether a line is a heading and about its level. One rule for both, so the
+    labeler's idea of a section label cannot drift from the locator's.
+    """
+    match = _SECTION_NUMBER.match(title.strip())
+    return match.group(1) if match else ""
+
+
 def strip_section_numbers(title: str) -> str:
     """Drop a leading section label from a heading title.
 

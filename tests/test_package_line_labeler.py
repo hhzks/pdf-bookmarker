@@ -129,3 +129,46 @@ def test_gap_above_is_scaled_by_font_size():
     v = ll.feature_vector(row("x", gap_above=20.0, size=10.0), 10)
     i = ll.FEATURE_NAMES.index("gap_ems")
     assert v[i] == 2.0
+
+
+# --- numbering depth ----------------------------------------------------------
+
+def depth(text):
+    i = ll.FEATURE_NAMES.index("number_depth")
+    return ll.feature_vector(row(text), page_count=10)[i]
+
+
+def numbered(text):
+    i = ll.FEATURE_NAMES.index("starts_numbered")
+    return ll.feature_vector(row(text), page_count=10)[i]
+
+
+def test_depth_counts_the_components():
+    """"4.1.2" is almost certainly a heading; "4" alone could be a list item,
+    and the depth is also what the level classifier needs."""
+    assert depth("4 Results") == 1.0
+    assert depth("4.1 Setup") == 2.0
+    assert depth("2.2.2 Notation") == 3.0
+
+
+def test_unnumbered_lines_have_depth_zero():
+    assert depth("Introduction") == 0.0
+    assert depth("the model was trained on 4.1 million rows") == 0.0
+
+
+def test_appendix_labels_count():
+    assert depth("A.3 Proofs") == 2.0
+    assert depth("B. Related Work") == 1.0
+    assert depth("IV. Discussion") == 1.0
+
+
+def test_an_appendix_letter_now_reads_as_numbered():
+    """The labeler's rule was narrower than the locator's: "B. Related Work"
+    scored 0 while the metric treated "B." as a section label."""
+    assert numbered("B. Related Work") == 1.0
+    assert numbered("IV. Discussion") == 1.0
+
+
+def test_numbered_and_depth_agree():
+    for text in ("4.1 Setup", "Introduction", "B. Related Work", "12 Appendix"):
+        assert (numbered(text) == 1.0) == (depth(text) > 0)
