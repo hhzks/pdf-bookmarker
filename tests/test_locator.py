@@ -1,5 +1,7 @@
 import fitz
+import pytest
 
+from pdf_bookmarker import locator
 from pdf_bookmarker.extractor import Line, extract_lines
 from pdf_bookmarker.locator import locate_entries
 from pdf_bookmarker.models import OutlineEntry
@@ -140,3 +142,32 @@ def test_snapping_adopts_only_a_numbering_difference():
     entries = [OutlineEntry("Overview", 1, printed_page=1)]
     located, _ = locate_entries(entries, lines, snap_titles=True)
     assert located[0].title == "4.1 Overview"
+
+
+# --- section_label: the shared rule, exposed for featurization ----------------
+
+@pytest.mark.parametrize(
+    "title,expected",
+    [
+        ("4.1 Results", "4.1"),
+        ("2.2.2 Notation", "2.2.2"),
+        ("1. Introduction", "1."),
+        ("12 Appendix", "12"),
+        ("A.3 Proofs", "A.3"),
+        ("B. Related Work", "B."),
+        ("IV. Discussion", "IV."),
+        ("Introduction", ""),
+        ("", ""),
+        ("2026 was a year", ""),      # a year is not a section label
+    ],
+)
+def test_section_label(title, expected):
+    assert locator.section_label(title) == expected
+
+
+def test_section_label_and_strip_agree(): 
+    """One rule: whatever the label is, stripping removes exactly that."""
+    title = "A.2.1 Assumptions"
+    label = locator.section_label(title)
+    assert title.startswith(label)
+    assert locator.strip_section_numbers(title) == title[len(label):].strip()

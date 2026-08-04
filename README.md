@@ -81,7 +81,7 @@ Or point `PDF_BOOKMARKER_LABELER` at it once and drop the flag. Measured over
 |---|---|
 | font heuristics (default install) | 0.6205 |
 | LLM alone | 0.7642 |
-| `--labeler` | 0.7685 |
+| `--labeler` | 0.7631 |
 | `--labeler` + auto mode | 0.7978 |
 | `--labeler --llm` | 0.8187 |
 
@@ -89,7 +89,10 @@ The two detectors miss different headings — the model cannot name a heading
 that is not a line of text, the LLM reconstructs wrapped and merged ones — so
 the outlines are merged rather than one replacing the other.
 
-The auto row is end-to-end with the shipped GGUF; the last row replayed the
+The LLM rows were measured with the previous revision of the heading model,
+which scored 0.7685 on titles and 0.8368 on levels; the current one trades an
+unchanged title score (paired, CI spanning zero) for +4.2 points of level
+accuracy. The auto row is end-to-end with the shipped GGUF; the last row replayed the
 same model's predictions over every document. Paired per document, the GGUF
 and the 4-bit adapter it was merged from are indistinguishable (6 wins, 8
 losses, 62 ties; 95% CI on the difference [−0.023, +0.004]).

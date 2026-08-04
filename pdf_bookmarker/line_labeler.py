@@ -16,10 +16,24 @@ import re
 
 from .extractor import Line
 from .heading_detector import body_text_size
+from .locator import section_label
 
-_NUMBERED = re.compile(r"^(\d+(\.\d+)*|[A-Za-z](\.\d+)+|[IVXLivxl]{1,5})[.\s]\s*\S")
 _ALL_CAPS = re.compile(r"^[^a-z]*[A-Z][^a-z]*$")
 _DIGITS = re.compile(r"\d+")
+
+
+def number_depth(text: str) -> int:
+    """How deep a line's section label goes: "4" 1, "4.1" 2, "2.2.2" 3, none 0.
+
+    Depth separates a subsection from a list item — "4." opens either, "4.1.2"
+    only ever opens a heading — and it is the same evidence the level
+    classifier needs. The label itself comes from locator.section_label, so
+    this cannot drift from the rule the locator and the metric apply.
+    """
+    label = section_label(text)
+    if not label:
+        return 0
+    return len([part for part in label.rstrip(".").split(".") if part])
 
 
 def text_for_model(text: str) -> str:
@@ -42,6 +56,7 @@ FEATURE_NAMES = [
     "y_frac",           # height down the page
     "page_frac",        # how far into the document
     "starts_numbered",  # "3.1 Results", "A.2 Method", "IV. Discussion"
+    "number_depth",     # 4 -> 1, 4.1 -> 2, 2.2.2 -> 3; also evidence of level
     "all_caps",
     "ends_colon",
     "ends_period",      # prose ends in a full stop; headings rarely do
@@ -56,6 +71,7 @@ def feature_vector(row: dict, page_count: int) -> list[float]:
     text = row["text"]
     stripped = text.strip()
     size = row.get("size") or 1.0
+    depth = number_depth(stripped)
     return [
         float(row.get("size_ratio", 1.0)),
         1.0 if row.get("bold") else 0.0,
@@ -65,7 +81,8 @@ def feature_vector(row: dict, page_count: int) -> list[float]:
         float(row.get("x", 0.0)),
         float(row.get("y", 0.0)) / _PAGE_HEIGHT,
         float(row.get("page", 0)) / max(page_count, 1),
-        1.0 if _NUMBERED.match(stripped) else 0.0,
+        1.0 if depth else 0.0,
+        float(depth),
         1.0 if stripped and _ALL_CAPS.match(stripped) else 0.0,
         1.0 if stripped.endswith(":") else 0.0,
         1.0 if stripped.endswith(".") else 0.0,
