@@ -100,7 +100,7 @@ def main(argv: list[str] | None = None) -> int:
 
         import torch
         from peft import LoraConfig
-        from transformers import AutoModelForCausalLM, AutoTokenizer
+        from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
         from trl import SFTConfig, SFTTrainer
     except ImportError as exc:
         print(
@@ -116,17 +116,39 @@ def main(argv: list[str] | None = None) -> int:
               "or on a CUDA machine", file=sys.stderr)
         return 1
 
+    # Pre-Ampere cards (T4/Turing, as on Azure NCasT4_v3) have no bf16 support:
+    # asking bitsandbytes to compute in bf16 there costs a slow emulated path.
+    # fp16 is the right mixed-precision dtype on those, bf16 everywhere newer.
+    bf16_ok = torch.cuda.is_available() and torch.cuda.is_bf16_supported()
+
+    # A base model that ships already quantized (e.g.
+    # unsloth/Qwen2.5-3B-Instruct-bnb-4bit, 2.1 GB on disk against 6.2 GB for
+    # the full-precision repo — the difference matters on a small disk quota)
+    # carries its own quantization_config; passing ours on top of it is an error.
+    prequantized = getattr(
+        AutoConfig.from_pretrained(args.base_model), "quantization_config", None
+    ) is not None
+
+    if prequantized and not use_4bit:
+        print("--no-4bit cannot un-quantize a pre-quantized base; pass a "
+              "full-precision --base-model instead", file=sys.stderr)
+        return 1
+
     model_kwargs: dict = {"torch_dtype": "auto"}
     if use_4bit:
-        from transformers import BitsAndBytesConfig
-
         model_kwargs["device_map"] = "auto"
-        model_kwargs["quantization_config"] = BitsAndBytesConfig(
-            load_in_4bit=True,
-            bnb_4bit_quant_type="nf4",
-            bnb_4bit_use_double_quant=True,
-            bnb_4bit_compute_dtype=torch.bfloat16,
-        )
+        if prequantized:
+            print(f"{args.base_model} is already quantized; using its own config",
+                  file=sys.stderr)
+        else:
+            from transformers import BitsAndBytesConfig
+
+            model_kwargs["quantization_config"] = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_quant_type="nf4",
+                bnb_4bit_use_double_quant=True,
+                bnb_4bit_compute_dtype=torch.bfloat16 if bf16_ok else torch.float16,
+            )
     model = AutoModelForCausalLM.from_pretrained(args.base_model, **model_kwargs)
     tokenizer = AutoTokenizer.from_pretrained(args.base_model)
 
@@ -145,11 +167,14 @@ def main(argv: list[str] | None = None) -> int:
         gradient_accumulation_steps=args.grad_accum,
         max_length=args.max_seq_len,
         completion_only_loss=True,  # mask the prompt; train on the JSON outline
-        bf16=torch.cuda.is_available() and torch.cuda.is_bf16_supported(),
+        bf16=bf16_ok,
+        fp16=torch.cuda.is_available() and not bf16_ok,
         gradient_checkpointing=True,
         logging_steps=5,
         eval_strategy="epoch" if val_records else "no",
         save_strategy="epoch",
+        save_total_limit=1,  # only the adapter is saved, but on a small disk
+                             # quota even a few hundred MB of stale epochs hurt
         seed=args.seed,
         report_to="none",
     )

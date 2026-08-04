@@ -1,0 +1,18 @@
+#cloud-config
+# Base packages for the retrain box. The NVIDIA driver comes from the
+# HpcCompute VM extension (provision.sh), not from here — cloud-init runs
+# before the extension and installing drivers twice fights over the kernel
+# module.
+package_update: true
+packages:
+  - git
+  - python3-venv
+  - python3-pip
+  - unzip
+  - zip
+  - tmux  # run_training.sh must survive a dropped SSH connection
+runcmd:
+  # Azure CLI on the box, so run_training.sh can pull the dataset and push the
+  # adapter with the VM's managed identity (no keys on disk).
+  - [bash, -c, "curl -fsSL https://aka.ms/InstallAzureCLIDeb | bash"]
+  - [bash, -c, "echo 'cloud-init finished' > /var/log/pdfbm-ready"]

@@ -174,6 +174,9 @@ pip install -r training/requirements.txt   # torch/trl/peft — training only, n
 python training/finetune.py dataset/ -o checkpoints/outline-lora
 ```
 
+To train on a rented GPU instead of the local card, see [REMOTE.md](REMOTE.md)
+(generic) or [AZURE.md](AZURE.md) (scripted, `training/azure/`).
+
 QLoRA (4-bit NF4) over the SFT splits; defaults to `Qwen/Qwen3.5-2B`,
 LoRA r=16 on all linear layers, completion-only loss, 2 epochs. Needs a CUDA
 GPU (~7 GB VRAM); on CPU pass `--no-4bit` (slow — use a smaller `--base-model`).
