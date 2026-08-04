@@ -51,6 +51,14 @@ from pdf_bookmarker.locator import strip_section_numbers
 _PAGE_WINDOW = 1
 _MAX_LEVEL = 4
 
+# Label for a line that is probably a heading but could not be aligned to a
+# specific bookmark. Training excludes these rather than teaching the model
+# that a real heading is a negative example.
+MASK = -1
+# Shortest title allowed to claim a line by prefix. "Th" would otherwise
+# prefix-match a large share of the document.
+_MIN_PREFIX_CHARS = 8
+
 
 def _key(text: str) -> str:
     """Normalized, section-label-insensitive form used to match a title."""
@@ -62,13 +70,21 @@ def align_labels(
     lines: list[Line],
     toc: list,
     max_level: int = _MAX_LEVEL,
+    mask_unaligned: bool = True,
 ) -> tuple[list[int], dict[str, int]]:
-    """Label each line with its heading level, or 0.
+    """Label each line with its heading level, 0, or MASK.
 
     toc is doc.get_toc(): (level, title, page) with page 1-based *physical*.
     Each bookmark claims at most one line, searched on the page it points at
     and then outward, so repeated titles ("Summary" in three chapters) take
     different lines instead of all collapsing onto the first.
+
+    About a fifth of bookmarks never align: the bookmark points to the wrong
+    page, the extractor split the title across two lines, or it merged the
+    heading with body text sharing a baseline. Those headings are still sitting
+    in the document, and leaving them at 0 teaches the model that a real
+    heading is a negative example. With mask_unaligned the lines that plainly
+    correspond to one are labeled MASK and dropped from training instead.
     """
     labels = [0] * len(lines)
     by_page: dict[int, list[int]] = {}
@@ -78,7 +94,8 @@ def align_labels(
     keys = [_key(line.text) for line in lines]
     # Both keys always present: a caller reading stats["aligned"] should not
     # have to guard against a document where nothing aligned.
-    stats: Counter[str] = Counter({"aligned": 0, "unaligned": 0})
+    stats: Counter[str] = Counter({"aligned": 0, "unaligned": 0, "masked": 0})
+    leftover: list[str] = []
     for entry in toc:
         level, title, page = entry[0], entry[1], entry[2]
         target = _key(title)
@@ -90,10 +107,40 @@ def align_labels(
         index = _find(keys, labels, by_page, target, hint)
         if index is None:
             stats["unaligned"] += 1
+            leftover.append(target)
             continue
         labels[index] = min(max(level, 1), max_level)
         stats["aligned"] += 1
+
+    if mask_unaligned:
+        # Second pass, after every bookmark has had its chance to claim a line
+        # exactly, so masking can never take a line off a real positive.
+        for target in leftover:
+            for i in _mask_candidates(keys, labels, target):
+                labels[i] = MASK
+                stats["masked"] += 1
     return labels, dict(stats)
+
+
+def _mask_candidates(keys: list[str], labels: list[int], target: str) -> list[int]:
+    """Unclaimed lines that plausibly are this unaligned heading.
+
+    Exact match anywhere covers a bookmark pointing at the wrong page. Prefix
+    either way covers the two extractor artifacts: the line is a fragment of a
+    title wrapped across lines, or the title is the start of a line the
+    extractor merged with body text.
+    """
+    found = []
+    for i, key in enumerate(keys):
+        if labels[i] != 0 or not key:
+            continue
+        if key == target:
+            found.append(i)
+        elif len(target) >= _MIN_PREFIX_CHARS and key.startswith(target):
+            found.append(i)
+        elif len(key) >= _MIN_PREFIX_CHARS and target.startswith(key):
+            found.append(i)
+    return found
 
 
 def _find(
@@ -173,6 +220,7 @@ def build_document(path: Path | str, max_level: int = _MAX_LEVEL) -> tuple[dict 
             "lines": rows,
             "aligned": stats.get("aligned", 0),
             "unaligned": stats.get("unaligned", 0),
+            "masked": stats.get("masked", 0),
         }, None
     finally:
         doc.close()
@@ -209,6 +257,7 @@ def main(argv: list[str] | None = None) -> int:
             totals["lines"] += len(record["lines"])
             totals["aligned"] += record["aligned"]
             totals["unaligned"] += record["unaligned"]
+            totals["masked"] += record["masked"]
             print(f"\r{n}/{len(pdfs)} documents", end="", file=sys.stderr)
 
     print(file=sys.stderr)
@@ -219,7 +268,9 @@ def main(argv: list[str] | None = None) -> int:
               f"({totals['aligned'] / gold:.1%})", file=sys.stderr)
     if totals["lines"]:
         print(f"  lines: {totals['lines']} "
-              f"({totals['aligned'] / totals['lines']:.2%} positive)", file=sys.stderr)
+              f"({totals['aligned'] / totals['lines']:.2%} positive, "
+              f"{totals['masked'] / totals['lines']:.2%} masked out of training)",
+              file=sys.stderr)
     for reason, count in skips.most_common():
         print(f"  skipped {count}: {reason}", file=sys.stderr)
     return 0 if written else 1

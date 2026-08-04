@@ -84,12 +84,86 @@ def test_falls_back_to_neighbouring_pages():
 
 
 def test_does_not_reach_across_the_whole_document():
-    """A far-away same-titled line is not the heading the bookmark means."""
+    """A far-away same-titled line is not the heading the bookmark means.
+
+    It must never become a positive. Masking may still exclude it from the
+    negatives (see test_masks_a_matching_line_outside_the_page_window), so
+    this pins the alignment behaviour with masking off.
+    """
+    lines = [line("Results", page=40, y=72, size=16, bold=True)]
+    toc = [(1, "Results", 1)]
+    labels, stats = bld.align_labels(lines, toc, mask_unaligned=False)
+    assert labels == [0]
+    assert stats["unaligned"] == 1
+    assert bld.align_labels(lines, toc)[0] == [bld.MASK]  # not a positive either
+
+
+# --- masking headings that could not be aligned ------------------------------
+
+def test_masks_a_matching_line_outside_the_page_window():
+    """The bookmark points elsewhere, but this line is plainly its heading."""
     lines = [line("Results", page=40, y=72, size=16, bold=True)]
     toc = [(1, "Results", 1)]
     labels, stats = bld.align_labels(lines, toc)
-    assert labels == [0]
+    assert labels == [bld.MASK]
+    assert stats["masked"] == 1
     assert stats["unaligned"] == 1
+
+
+def test_masks_a_wrapped_toc_row():
+    """The extractor split the title across lines, so nothing matches exactly."""
+    lines = [line("Information security protections are implemented so as to be", page=0)]
+    toc = [(1, "Information security protections are implemented so as to be "
+            "commensurate with risk", 1)]
+    labels, stats = bld.align_labels(lines, toc)
+    assert labels == [bld.MASK]
+    assert stats["masked"] == 1
+
+
+def test_masks_a_heading_merged_with_body_text():
+    """extract_lines merges fragments on one baseline, swallowing the heading."""
+    lines = [line("2 Background  the Platform feature is optional here", page=0)]
+    toc = [(1, "2 Background", 1)]
+    labels, stats = bld.align_labels(lines, toc)
+    assert labels == [bld.MASK]
+
+
+def test_masking_can_be_turned_off():
+    lines = [line("Results", page=40, y=72)]
+    toc = [(1, "Results", 1)]
+    labels, stats = bld.align_labels(lines, toc, mask_unaligned=False)
+    assert labels == [0]
+    assert stats["masked"] == 0
+
+
+def test_masking_never_overwrites_an_aligned_line():
+    """A line that IS some bookmark's heading stays a positive example."""
+    lines = [
+        line("Summary", page=0, y=72, size=14, bold=True),
+        line("Summary", page=9, y=72, size=14, bold=True),
+    ]
+    # First aligns on page 0; the second bookmark points far away and fails.
+    toc = [(1, "Summary", 1), (2, "Summary", 40)]
+    labels, stats = bld.align_labels(lines, toc)
+    assert labels[0] == 1                    # kept as a positive
+    assert labels[1] in (2, bld.MASK)        # claimed or masked, never 0
+
+
+def test_short_titles_do_not_mask_unrelated_lines():
+    """A two-character title must not prefix-match half the document."""
+    lines = [line("The quick brown fox jumps", page=0)]
+    toc = [(1, "Th", 1)]
+    labels, stats = bld.align_labels(lines, toc)
+    assert labels == [0]
+    assert stats["masked"] == 0
+
+
+def test_unrelated_lines_are_left_as_negatives():
+    lines = [line("Completely different content", page=0)]
+    toc = [(1, "Missing Heading", 1)]
+    labels, stats = bld.align_labels(lines, toc)
+    assert labels == [0]
+    assert stats["masked"] == 0
 
 
 def test_deeper_levels_are_capped():

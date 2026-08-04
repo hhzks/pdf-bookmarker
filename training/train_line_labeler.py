@@ -33,6 +33,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import numpy as np
 
 from build_dataset import split_of
+from build_line_dataset import MASK
 from line_labeler import FEATURE_NAMES, entries_from_labels, feature_vector
 
 
@@ -55,12 +56,20 @@ def load(path: Path, test_shas: set[str] | None, train_frac: float, val_frac: fl
                     # the generative model never saw, so drop it entirely.
                     continue
             rows = doc["lines"]
-            vectors = [feature_vector(r, doc["page_count"]) for r in rows]
-            labels = [r["label"] for r in rows]
-            splits[split]["X"].extend(vectors)
-            splits[split]["y"].extend(labels)
             if split == "test":
+                # Test rows are never trained on and are scored through
+                # evaluate.py, so keep the document whole and unfiltered.
                 test_docs.append(doc)
+            else:
+                # Drop MASK rows: headings that could not be tied to a specific
+                # bookmark. Keeping them would train the model to call a real
+                # heading a negative.
+                for row, vector in zip(rows, (feature_vector(r, doc["page_count"])
+                                              for r in rows)):
+                    if row["label"] == MASK:
+                        continue
+                    splits[split]["X"].append(vector)
+                    splits[split]["y"].append(row["label"])
     for part in splits.values():
         part["X"] = np.asarray(part["X"], dtype=np.float32)
         part["y"] = np.asarray(part["y"], dtype=np.int8)
