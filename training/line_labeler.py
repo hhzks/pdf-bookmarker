@@ -15,6 +15,18 @@ import re
 
 _NUMBERED = re.compile(r"^(\d+(\.\d+)*|[A-Za-z](\.\d+)+|[IVXLivxl]{1,5})[.\s]\s*\S")
 _ALL_CAPS = re.compile(r"^[^a-z]*[A-Z][^a-z]*$")
+_DIGITS = re.compile(r"\d+")
+
+
+def text_for_model(text: str) -> str:
+    """Normalized line text for the lexical model.
+
+    Digits collapse to a single token so that "1 Introduction" and
+    "7 Introduction" are one piece of evidence rather than two rare ones —
+    the *shape* of a section label is already a layout feature
+    (`starts_numbered`), so the specific number only fragments the vocabulary.
+    """
+    return " ".join(_DIGITS.sub("#", text.lower()).split())
 
 FEATURE_NAMES = [
     "size_ratio",       # font size relative to the document's body size

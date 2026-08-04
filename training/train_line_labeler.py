@@ -17,6 +17,25 @@ Splits are build_dataset.split_of, the same deterministic sha256 buckets the
 generative path uses, so no document leaks across splits and the test set is
 the one every other experiment was scored on.
 
+--text adds a lexical score over the line text as a 14th feature. **It is
+off because it was measured and it changes nothing**: title F1 0.7671 -> 0.7675,
+paired mean +0.0005 with a 95% interval of [-0.0092, +0.0096]. The reason is
+not a broken text model, and not redundancy -- the lexical score correlates
+only 0.26 with the layout score and does learn the right things ('introduction',
+'conclusion', 'references' positive; stopwords negative). It is simply far less
+informative for this task:
+
+    validation, 1.4% positives      ROC-AUC   average precision
+      text only                      0.8801        0.1421
+      layout only                    0.9914        0.7410
+      both                           0.9916        0.7482
+
+Permutation importance puts text_score last, below every layout feature
+(+0.0405 average precision, against starts_numbered's +0.3738). Most headings
+are document-specific noun phrases with no lexical regularity to learn, so a
+stronger text model -- an encoder over the line -- should not be expected to
+move this much either.
+
 Usage:
     python training/train_line_labeler.py lines_all.jsonl -o preds_lines.jsonl
     python training/train_line_labeler.py lines_all.jsonl -o p.jsonl --test-shas records_test_eval.jsonl
@@ -34,13 +53,18 @@ import numpy as np
 
 from build_dataset import split_of
 from build_line_dataset import MASK
-from line_labeler import FEATURE_NAMES, entries_from_labels, feature_vector
+from line_labeler import (
+    FEATURE_NAMES,
+    entries_from_labels,
+    feature_vector,
+    text_for_model,
+)
 
 
 def load(path: Path, test_shas: set[str] | None, train_frac: float, val_frac: float):
     """Stream documents into per-split feature matrices, keeping test rows whole."""
     splits: dict[str, dict] = {
-        name: {"X": [], "y": []} for name in ("train", "val", "test")
+        name: {"X": [], "y": [], "text": []} for name in ("train", "val", "test")
     }
     test_docs = []
     with open(path, encoding="utf-8") as f:
@@ -70,10 +94,50 @@ def load(path: Path, test_shas: set[str] | None, train_frac: float, val_frac: fl
                         continue
                     splits[split]["X"].append(vector)
                     splits[split]["y"].append(row["label"])
+                    splits[split]["text"].append(text_for_model(row["text"]))
     for part in splits.values():
         part["X"] = np.asarray(part["X"], dtype=np.float32)
         part["y"] = np.asarray(part["y"], dtype=np.int8)
     return splits, test_docs
+
+
+def fit_text_model(texts: list[str], truth, folds: int = 3, seed: int = 0):
+    """Lexical heading model, plus leak-free scores for its own training rows.
+
+    Returns (vectorizer, model, out_of_fold_scores). The scores handed back for
+    the training rows come from models that never saw those rows: a stacked
+    feature scored in-sample looks far more reliable than it is, and the
+    gradient booster downstream would lean on it and generalise worse.
+    """
+    from sklearn.feature_extraction.text import TfidfVectorizer
+    from sklearn.linear_model import SGDClassifier
+    from sklearn.model_selection import StratifiedKFold
+
+    vectorizer = TfidfVectorizer(
+        ngram_range=(1, 2), min_df=5, max_features=300_000, sublinear_tf=True
+    )
+    matrix = vectorizer.fit_transform(texts)
+    positive = (truth > 0).astype(np.int8)
+
+    def make():
+        return SGDClassifier(
+            loss="log_loss", class_weight="balanced", max_iter=15,
+            tol=1e-4, random_state=seed,
+        )
+
+    out_of_fold = np.zeros(len(texts), dtype=np.float32)
+    splitter = StratifiedKFold(n_splits=folds, shuffle=True, random_state=seed)
+    for fold, (fit_idx, score_idx) in enumerate(splitter.split(matrix, positive), 1):
+        model = make().fit(matrix[fit_idx], positive[fit_idx])
+        out_of_fold[score_idx] = model.predict_proba(matrix[score_idx])[:, 1]
+        print(f"  text fold {fold}/{folds}", file=sys.stderr)
+    full = make().fit(matrix, positive)
+    return vectorizer, full, out_of_fold
+
+
+def with_text(X, scores):
+    """Append the lexical score as one more column."""
+    return np.hstack([X, np.asarray(scores, dtype=np.float32).reshape(-1, 1)])
 
 
 def tune_threshold(probabilities, truth, grid=None) -> tuple[float, float]:
@@ -110,6 +174,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--train", type=float, default=0.8, dest="train_frac")
     parser.add_argument("--val", type=float, default=0.1, dest="val_frac")
     parser.add_argument("--max-iter", type=int, default=300)
+    parser.add_argument("--text", action="store_true",
+                        help="add a lexical score over the line text as a "
+                        "feature (default: layout only, the control)")
     args = parser.parse_args(argv)
 
     from sklearn.ensemble import HistGradientBoostingClassifier
@@ -132,6 +199,19 @@ def main(argv: list[str] | None = None) -> int:
     if not len(train["y"]):
         print("no training data", file=sys.stderr)
         return 1
+
+    vectorizer = text_model = None
+    if args.text:
+        print("fitting lexical model...", file=sys.stderr)
+        vectorizer, text_model, out_of_fold = fit_text_model(
+            train["text"], train["y"]
+        )
+        train["X"] = with_text(train["X"], out_of_fold)
+        if len(val["y"]):
+            val["X"] = with_text(
+                val["X"],
+                text_model.predict_proba(vectorizer.transform(val["text"]))[:, 1],
+            )
 
     print("fitting detector...", file=sys.stderr)
     detector = HistGradientBoostingClassifier(
@@ -159,6 +239,11 @@ def main(argv: list[str] | None = None) -> int:
             X = np.asarray(
                 [feature_vector(r, doc["page_count"]) for r in rows], dtype=np.float32
             )
+            if text_model is not None:
+                texts = [text_for_model(r["text"]) for r in rows]
+                X = with_text(
+                    X, text_model.predict_proba(vectorizer.transform(texts))[:, 1]
+                )
             is_heading = detector.predict_proba(X)[:, 1] >= threshold
             labels = np.zeros(len(rows), dtype=np.int8)
             if is_heading.any():
@@ -186,11 +271,10 @@ def main(argv: list[str] | None = None) -> int:
 
     print(f"wrote {counts['docs']} documents, {counts['entries']} entries "
           f"to {args.output}", file=sys.stderr)
-    importances = sorted(
-        zip(FEATURE_NAMES, np.std(train["X"], axis=0)), key=lambda kv: -kv[1]
-    )
+    names = FEATURE_NAMES + (["text_score"] if text_model is not None else [])
+    spread = sorted(zip(names, np.std(train["X"], axis=0)), key=lambda kv: -kv[1])
     print("feature spread (sanity check, not importance): "
-          + ", ".join(f"{n}={v:.2f}" for n, v in importances[:5]), file=sys.stderr)
+          + ", ".join(f"{n}={v:.2f}" for n, v in spread[:5]), file=sys.stderr)
     return 0
 
 

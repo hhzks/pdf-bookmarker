@@ -103,6 +103,32 @@ def test_numbering_shape_is_a_feature():
     assert plain[i] == 0.0
 
 
+# --- text fed to the lexical model ------------------------------------------
+
+def test_text_is_lowercased_for_the_lexical_model():
+    assert ll.text_for_model("Introduction") == ll.text_for_model("INTRODUCTION")
+
+
+def test_digits_collapse_so_sections_share_a_token():
+    """"1 Introduction" and "7 Introduction" are the same lexical evidence."""
+    assert ll.text_for_model("1 Introduction") == ll.text_for_model("7 Introduction")
+    assert ll.text_for_model("2.3 Methods") == ll.text_for_model("10.4 Methods")
+
+
+def test_digit_collapsing_keeps_the_words():
+    assert "introduction" in ll.text_for_model("1. Introduction")
+
+
+def test_whitespace_is_normalized():
+    assert ll.text_for_model("  Results   and  Discussion ") == (
+        ll.text_for_model("Results and Discussion")
+    )
+
+
+def test_distinct_wording_stays_distinct():
+    assert ll.text_for_model("References") != ll.text_for_model("Appendix")
+
+
 def test_gap_above_is_scaled_by_font_size():
     """Raw points are not comparable across documents; ems are."""
     v = ll.feature_vector(row("x", gap_above=20.0, size=10.0), 10)
