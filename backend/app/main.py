@@ -111,6 +111,11 @@ def _check_verification_model() -> tuple[int, str]:
     """
     spec = routes.SERVER_MODEL_SPEC  # read now, not at import: tests and
     provider, _, model = spec.partition(":")  # embedders can set it
+    if not spec:
+        return logging.INFO, (
+            "no verification model configured; outlines come from the heading "
+            "model alone unless a caller supplies an API key (VERIFICATION_MODEL)"
+        )
     if provider != "local":
         return logging.INFO, f"verification model: {spec}"
     if model and Path(model).is_file():

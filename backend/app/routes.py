@@ -5,16 +5,19 @@ from pathlib import Path
 from fastapi import APIRouter, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 
+from pdf_bookmarker import llm
+
 MAX_SIZE = 50 * 1024 * 1024  # 50 MB
 VALID_MODES = {"auto", "always", "never"}
 
-# The server decides the verification model. Override at deploy time with the
-# VERIFICATION_MODEL env var (e.g. "anthropic:claude-opus-4-8") — no code change.
+# The server runs no LLM of its own: the heading model produces the outline and
+# verification is opt-in. On a CPU host the local GGUF costs minutes per
+# document for roughly 3 title F1, which is not a trade worth making by default.
 #
-# The default is the fine-tuned Qwen GGUF served through llama.cpp: no API key,
-# no per-document cost, and no upload leaving the machine. A cloud model is
-# still one env var away, and a caller who brings their own key may pick one.
-SERVER_MODEL_SPEC = os.environ.get("VERIFICATION_MODEL", "local:models/outline.gguf")
+# Set VERIFICATION_MODEL to put the deployment back in charge — a local GGUF
+# ("local:models/outline.gguf", worthwhile on a GPU host) or a cloud model. A
+# caller who brings their own API key can always select one per request.
+SERVER_MODEL_SPEC = os.environ.get("VERIFICATION_MODEL", "")
 
 # Bound OCR cost on the free tier: scanned PDFs longer than this are rejected.
 OCR_MAX_PAGES = int(os.environ.get("OCR_MAX_PAGES", "50"))
@@ -57,7 +60,14 @@ async def create_job(
 
     # The server decides the model; a caller may only override it when they
     # bring their own API key. A model sent without a key is ignored.
-    model_spec = (model or SERVER_MODEL_SPEC) if api_key else SERVER_MODEL_SPEC
+    if api_key:
+        model_spec = model or SERVER_MODEL_SPEC or llm.DEFAULT_MODEL_SPEC
+    else:
+        model_spec = SERVER_MODEL_SPEC
+        # Nothing to call: say so up front rather than letting the pipeline
+        # build a backend for an empty spec and fail per job.
+        if not model_spec:
+            llm_mode = "never"
 
     store = request.app.state.jobs
     job = store.submit(
