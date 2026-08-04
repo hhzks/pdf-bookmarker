@@ -19,22 +19,39 @@ the one every other experiment was scored on.
 
 --text adds a lexical score over the line text as a 14th feature. **It is
 off because it was measured and it changes nothing**: title F1 0.7671 -> 0.7675,
-paired mean +0.0005 with a 95% interval of [-0.0092, +0.0096]. The reason is
-not a broken text model, and not redundancy -- the lexical score correlates
-only 0.26 with the layout score and does learn the right things ('introduction',
-'conclusion', 'references' positive; stopwords negative). It is simply far less
-informative for this task:
+paired mean +0.0005 with a 95% interval of [-0.0092, +0.0096].
 
-    validation, 1.4% positives      ROC-AUC   average precision
-      text only                      0.8801        0.1421
-      layout only                    0.9914        0.7410
-      both                           0.9916        0.7482
+**Text is not the missing signal, and the reason is redundancy, not weakness.**
+An earlier version of this note blamed the lexical model for being
+uninformative -- "document-specific noun phrases with no lexical regularity".
+That was wrong, and it was tested directly by replacing TF-IDF with a real
+sentence encoder (all-MiniLM-L6-v2), frozen and then fine-tuned on these
+labels:
 
-Permutation importance puts text_score last, below every layout feature
-(+0.0405 average precision, against starts_numbered's +0.3738). Most headings
-are document-specific noun phrases with no lexical regularity to learn, so a
-stronger text model -- an encoder over the line -- should not be expected to
-move this much either.
+    text model              text-only AP   corr. w/ layout   test title F1
+      tfidf                       0.1243              0.26        +0.0005
+      frozen encoder              0.4348             0.394        +0.0034
+      frozen encoder, 32 dims     0.4348             0.394        +0.0034
+      fine-tuned encoder          0.6668             0.644        +0.0022
+      (layout alone)              0.7684                 -              -
+
+Text quality improved **5.4x** and the end metric never moved -- every variant's
+paired interval spans zero (the best was 24 wins against 25 losses). A
+fine-tuned encoder reading only the words nearly matches the whole layout model
+on its own, and contributes nothing on top of it, because **the better a text
+model gets at this task the more it converges on what layout already knows**:
+the correlation with the layout score rose monotonically, 0.26 -> 0.394 ->
+0.644.
+
+Two things learned along the way, both reusable:
+
+  * collapsing an encoder to one stacked probability is a real bottleneck --
+    32 SVD components beat the scalar 5:1 on validation (+0.0161 vs +0.0030);
+  * but out-of-fold stacking only works for *scores*, not representations.
+    Fold models do not share a coordinate space, so out-of-fold embeddings are
+    incoherent across folds and collapse the booster (AP 0.7684 -> 0.1252).
+
+Do not re-open this without a signal that is not "read the line's text".
 
 Usage:
     python training/train_line_labeler.py lines_all.jsonl -o preds_lines.jsonl
