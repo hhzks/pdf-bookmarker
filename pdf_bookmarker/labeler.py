@@ -9,7 +9,7 @@ Measured on the 76-document evaluation set (`--ignore-section-numbers`):
 
     font heuristics   0.6205 title F1
     LLM (Qwen3.5-2B)  0.7642
-    this              0.7671   precision 0.8588, level accuracy 0.8368
+    this              0.7797   precision 0.8635, level accuracy 0.8879
     this + the LLM    0.8104   see merge.merge_outlines
 
 The model is a pair of fitted scikit-learn estimators produced by

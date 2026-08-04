@@ -140,6 +140,29 @@ def with_text(X, scores):
     return np.hstack([X, np.asarray(scores, dtype=np.float32).reshape(-1, 1)])
 
 
+# Shared by both stages. Two departures from sklearn's defaults, both measured
+# on the validation documents:
+#
+#   early_stopping  sklearn turns it on above 10k samples and stops on the loss
+#                   over a random 10% of rows. Headings are 1.4% of rows, so
+#                   that split is almost all negatives and the detector quit at
+#                   99 of 300 iterations -- badly under-fitted. Fitting to the
+#                   cap instead: validation 0.6519 -> 0.6936, test 0.7631 ->
+#                   0.7783 title F1.
+#   max_leaf_nodes  63 against sklearn's 31, chosen on validation among a slow
+#                   long fit and a patient stopping rule: 0.6979, the best of
+#                   the four. Test 0.7797.
+#
+# Seed-averaging five detectors does *not* help (validation 0.6498), which is
+# the tell that this was under-fitting rather than variance.
+ESTIMATOR_PARAMS = {
+    "class_weight": "balanced",   # 1.4% positives; without it, all-negative
+    "early_stopping": False,
+    "max_leaf_nodes": 63,
+    "random_state": 0,
+}
+
+
 def tune_threshold(probabilities, truth, grid=None) -> tuple[float, float]:
     """Pick the probability cut that maximises F1 on held-out data."""
     # Reaches past 0.95: with headings at ~1.4% of lines and class_weight
@@ -218,7 +241,7 @@ def main(argv: list[str] | None = None) -> int:
 
     print("fitting detector...", file=sys.stderr)
     detector = HistGradientBoostingClassifier(
-        max_iter=args.max_iter, class_weight="balanced", random_state=0
+        max_iter=args.max_iter, **ESTIMATOR_PARAMS
     )
     detector.fit(train["X"], (train["y"] > 0).astype(np.int8))
 
@@ -230,7 +253,7 @@ def main(argv: list[str] | None = None) -> int:
     print("fitting level classifier...", file=sys.stderr)
     positive = train["y"] > 0
     leveler = HistGradientBoostingClassifier(
-        max_iter=args.max_iter, class_weight="balanced", random_state=0
+        max_iter=args.max_iter, **ESTIMATOR_PARAMS
     )
     leveler.fit(train["X"][positive], train["y"][positive])
 
