@@ -31,6 +31,16 @@ _SECTION_NUMBER = re.compile(
 )
 
 
+# "Chapter 2.", "Appendix A:", "Part II" — printed headings carry these and
+# embedded bookmarks almost never do, so a title match fails on the label
+# alone. The label word must be followed by a number or a single letter, which
+# keeps "Chapters in history" and "Part of the problem" intact.
+_WORD_LABEL = re.compile(
+    r"^(chapter|appendix|part|section|annex)\s+(\d+|[ivxl]+|[a-z])\b[.:]?\s+",
+    re.IGNORECASE,
+)
+
+
 def section_label(title: str) -> str:
     """The leading section label, or "" — "4.1 Results" -> "4.1".
 
@@ -49,8 +59,21 @@ def strip_section_numbers(title: str) -> str:
     The printed heading usually carries numbering that a TOC entry or an LLM
     may omit (and PDFs' embedded bookmarks usually omit too), so "1
     Introduction" and "Introduction" have to be recognised as one heading.
+
+    Word labels go too — "Chapter 2. Foo" against a bookmark reading "2 Foo" —
+    and then the numeric rule runs again, because "Chapter 4. 4.2 Foo" carries
+    both. Never strip everything: a heading that is only "Appendix A" keeps its
+    text, since an empty title matches nothing.
+
+    `section_label` deliberately does *not* follow this: it feeds the trained
+    `number_depth` feature, and widening it would need a retrain to match.
     """
-    return _SECTION_NUMBER.sub("", title.strip())
+    stripped = title.strip()
+    without_word = _WORD_LABEL.sub("", stripped, count=1)
+    if without_word.strip():
+        stripped = without_word
+    result = _SECTION_NUMBER.sub("", stripped)
+    return result if result.strip() else stripped
 
 
 def locate_entries(
