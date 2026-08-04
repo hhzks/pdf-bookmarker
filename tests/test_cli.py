@@ -273,3 +273,10 @@ def test_llm_density_defaults_to_the_measured_threshold(toc_pdf, monkeypatch, tm
     rc = cli.main([str(toc_pdf), "-o", str(tmp_path / "o.pdf")])
     assert rc == 0
     assert captured["llm_density"] == cli.llm.SPARSE_ENTRIES_PER_PAGE
+
+
+def test_a_bad_labeler_path_is_a_clean_error(toc_pdf, capsys):
+    """A typo'd --labeler must not surface as a traceback."""
+    rc = cli.main([str(toc_pdf), "--labeler", "nope.joblib", "--no-llm", "--dry-run"])
+    assert rc == 2
+    assert "labeler model not found" in capsys.readouterr().err

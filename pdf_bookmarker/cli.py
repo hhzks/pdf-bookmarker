@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 
 from . import llm, pipeline
+from .labeler import LabelerError
 from .models import OutlineEntry
 
 
@@ -67,7 +68,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"warning: {warning}", file=sys.stderr)
         print(f"error: {exc}", file=sys.stderr)
         return 1
-    except (pipeline.PipelineError, llm.UnknownProviderError) as exc:
+    except (pipeline.PipelineError, llm.UnknownProviderError, LabelerError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 

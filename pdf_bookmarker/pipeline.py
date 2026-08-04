@@ -207,6 +207,10 @@ def process_pdf(
 
 _LABELER_ENV = "PDF_BOOKMARKER_LABELER"
 
+# Last model loaded, as ((path, mtime, size), model). One slot: a deployment
+# serves one model, and a second path simply evicts the first.
+_CACHED_LABELER: tuple[tuple[str, int, int], object] | None = None
+
 
 def resolve_labeler(labeler_path: str | Path | None):
     """Load the line-labeling detector, or None when none is configured.
@@ -214,11 +218,30 @@ def resolve_labeler(labeler_path: str | Path | None):
     Off unless asked for: an install with no model behaves exactly as before.
     The env var exists so a deployment can enable it without every caller
     threading a path through.
+
+    The bundle is cached across calls — the web worker resolves once per job,
+    and unpickling a 1.7 MB model per PDF is pure latency. The cache key
+    includes the file's mtime and size, so replacing the model on disk takes
+    effect without a restart. Two threads racing here both load and one wins
+    the slot; either model is valid, so the store stays lock-free like the rest
+    of the worker path.
     """
+    global _CACHED_LABELER
     path = labeler_path or os.environ.get(_LABELER_ENV)
     if not path:
         return None
-    return labeler_module.Labeler.load(path)
+    path = Path(path)
+    try:
+        info = path.stat()
+    except OSError:
+        return labeler_module.Labeler.load(path)  # missing/unreadable: let it say so
+    key = (str(path), info.st_mtime_ns, info.st_size)
+    cached = _CACHED_LABELER
+    if cached is not None and cached[0] == key:
+        return cached[1]
+    model = labeler_module.Labeler.load(path)
+    _CACHED_LABELER = (key, model)
+    return model
 
 
 def build_outline(

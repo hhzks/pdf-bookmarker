@@ -114,3 +114,12 @@ def test_cleanup_retries_when_dir_is_locked(fake_pipeline):
     store.cleanup_expired(now=time.time() + 3601)
     assert store.get(job.id) is None
     assert not job.dir.exists()
+
+
+def test_a_broken_labeler_gets_a_friendly_message():
+    """The model file vanishing mid-run is an operator problem, not a user one."""
+    from pdf_bookmarker.labeler import LabelerError
+
+    message = jobs_module.friendly_error(LabelerError("labeler model not found: x"))
+    assert "unexpectedly" not in message
+    assert "server" in message.lower()

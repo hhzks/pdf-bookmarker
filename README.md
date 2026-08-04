@@ -3,8 +3,9 @@
 Add a hierarchical bookmark outline to text-based PDFs. Parses the table of
 contents when one exists (preserving chapter/subchapter structure and linking
 each bookmark to the section's real location), and falls back to font-based
-heading detection when there is no TOC. An optional LLM pass verifies or
-repairs low-confidence outlines.
+heading detection when there is no TOC. Two optional detectors improve on that
+substantially: a [trained heading model](#heading-model-recommended) and an
+[LLM pass](#choosing-a-model) that verifies or repairs low-confidence outlines.
 
 ## Install
 
@@ -50,6 +51,42 @@ The LLM layer is provider-agnostic: implement `pdf_bookmarker.llm.LLMBackend`,
 register the class in `_BACKENDS`, and (optionally) list its key env vars in
 `ENV_KEYS` to add another provider.
 
+### Heading model (recommended)
+
+An optional trained heading detector classifies every line of the PDF as
+not-a-heading or its nesting level. Titles come from the page itself, so they
+are exact, and each bookmark already knows its physical page — no searching for
+it afterwards. It is a ~1.7 MB gradient-boosted tree over typography features
+(size, weight, position, spacing): CPU-only, milliseconds per document, no key.
+
+    pip install -e ".[labeler]"                        # scikit-learn + joblib
+    pdf-bookmarker input.pdf --labeler models/labeler.joblib
+
+Or point `PDF_BOOKMARKER_LABELER` at it once and drop the flag. Measured over
+76 held-out documents (macro title F1, section numbering ignored):
+
+| configuration | title F1 |
+|---|---|
+| font heuristics (default install) | 0.6205 |
+| LLM alone | 0.7642 |
+| `--labeler` | 0.7685 |
+| `--labeler` + auto mode | 0.8055 |
+| `--labeler --llm` | 0.8187 |
+
+The two detectors miss different headings — the model cannot name a heading
+that is not a line of text, the LLM reconstructs wrapped and merged ones — so
+the outlines are merged rather than one replacing the other.
+
+With a labeler configured, auto mode calls the LLM when the model found
+**0.5 headings per page or fewer**, which is where it adds most: that routes
+43% of documents and buys about three quarters of the gain. `--llm-density`
+moves the threshold (`0` never escalates; `1.5` maximises quality and escalates
+on nearly everything, i.e. `--llm`).
+
+Train one with `training/train_line_labeler.py --save-model` (see
+`training/README.md`); the bundle records the feature set it was fitted on and
+is refused if it does not match the code loading it.
+
 ### Scanned PDFs (OCR)
 
 Scanned PDFs (no text layer) are automatically OCR'd and run through the same
@@ -89,6 +126,20 @@ Web UI lives in `frontend/` (React + Vite) with a FastAPI backend in `backend/`.
     pip install -e ".[dev]"
     cd backend
     uvicorn app.main:app --port 8000
+
+### Deployment settings
+
+| env var | effect |
+|---|---|
+| `ALLOWED_ORIGINS` | comma-separated CORS allowlist; unset blocks other origins |
+| `PDF_BOOKMARKER_LABELER` | path to the heading model; unset means heuristics only |
+| `VERIFICATION_MODEL` | server-side LLM, default `gemini:gemini-3.5-flash` |
+| `OCR_MAX_PAGES` | reject scanned PDFs longer than this (default 50) |
+
+The labeler is loaded and validated once at startup: a path that cannot be used
+stops the server there, rather than failing every upload with a message about a
+model the user never asked for. Replacing the file on disk is picked up without
+a restart.
 
     # in a second terminal
     cd frontend
