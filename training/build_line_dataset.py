@@ -44,6 +44,7 @@ from pdf_bookmarker import extractor
 from pdf_bookmarker.extractor import Line
 from pdf_bookmarker.heading_detector import body_text_size
 from pdf_bookmarker.locator import strip_section_numbers
+from pdf_bookmarker.toc_detector import find_toc_pages, is_toc_row
 
 # How far from the page a bookmark points at we will look for its heading.
 # Bookmarks routinely land a page early or late; anything further away is a
@@ -71,6 +72,7 @@ def align_labels(
     toc: list,
     max_level: int = _MAX_LEVEL,
     mask_unaligned: bool = True,
+    toc_pages: set[int] | None = None,
 ) -> tuple[list[int], dict[str, int]]:
     """Label each line with its heading level, 0, or MASK.
 
@@ -115,14 +117,34 @@ def align_labels(
     if mask_unaligned:
         # Second pass, after every bookmark has had its chance to claim a line
         # exactly, so masking can never take a line off a real positive.
+        blocked = _unmaskable(lines, toc_pages or set())
         for target in leftover:
-            for i in _mask_candidates(keys, labels, target):
+            for i in _mask_candidates(keys, labels, target, blocked):
                 labels[i] = MASK
                 stats["masked"] += 1
     return labels, dict(stats)
 
 
-def _mask_candidates(keys: list[str], labels: list[int], target: str) -> list[int]:
+def _unmaskable(lines: list[Line], toc_pages: set[int]) -> set[int]:
+    """Lines that must stay negatives however well they match a title.
+
+    A contents row quotes the heading verbatim, so it matches every rule below
+    — and it is the single most informative negative the model has, teaching
+    that dot leaders and a trailing page number mean "not a heading". Masking
+    those cost 1.2 title F1 when measured (0.7671 -> 0.7555), which is how this
+    guard came to exist. is_toc_row needs two separator characters before the
+    page number, so the detected TOC pages catch the rows it misses.
+    """
+    return {
+        i
+        for i, line in enumerate(lines)
+        if line.page in toc_pages or is_toc_row(line.text)
+    }
+
+
+def _mask_candidates(
+    keys: list[str], labels: list[int], target: str, blocked: set[int]
+) -> list[int]:
     """Unclaimed lines that plausibly are this unaligned heading.
 
     Exact match anywhere covers a bookmark pointing at the wrong page. Prefix
@@ -132,7 +154,7 @@ def _mask_candidates(keys: list[str], labels: list[int], target: str) -> list[in
     """
     found = []
     for i, key in enumerate(keys):
-        if labels[i] != 0 or not key:
+        if labels[i] != 0 or not key or i in blocked:
             continue
         if key == target:
             found.append(i)
@@ -207,7 +229,8 @@ def build_document(path: Path | str, max_level: int = _MAX_LEVEL) -> tuple[dict 
         lines = extractor.extract_lines(doc)
         if not lines:
             return None, "no-text-layer"
-        labels, stats = align_labels(lines, toc, max_level)
+        toc_pages = set(find_toc_pages(lines, doc.page_count))
+        labels, stats = align_labels(lines, toc, max_level, toc_pages=toc_pages)
         if not stats.get("aligned"):
             return None, "no-alignment"
         rows = line_features(lines)

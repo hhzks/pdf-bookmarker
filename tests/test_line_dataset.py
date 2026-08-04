@@ -149,6 +149,37 @@ def test_masking_never_overwrites_an_aligned_line():
     assert labels[1] in (2, bld.MASK)        # claimed or masked, never 0
 
 
+def test_toc_rows_are_never_masked():
+    """A contents row contains the title verbatim but is not a heading.
+
+    These are the most informative negatives the model has -- they teach that
+    dot leaders and a trailing page number mean "not a heading" -- so an
+    unaligned bookmark must not remove them from the negative class.
+    """
+    lines = [line("Hitchin fibration . . . . . . 24", page=1)]
+    toc = [(1, "Hitchin fibration", 30)]
+    labels, stats = bld.align_labels(lines, toc)
+    assert labels == [0]
+    assert stats["masked"] == 0
+
+
+def test_lines_on_a_contents_page_are_never_masked():
+    """Rows the regex misses ("Approach: Data 4") are caught by page."""
+    lines = [line("1.2 My Approach: Multimodal Observability Data 4", page=2)]
+    toc = [(1, "1.2 My Approach: Multimodal Observability Data", 40)]
+    labels, stats = bld.align_labels(lines, toc, toc_pages={2})
+    assert labels == [0]
+    assert stats["masked"] == 0
+
+
+def test_a_real_heading_is_still_masked_on_a_body_page():
+    lines = [line("Hitchin fibration", page=30, size=16, bold=True)]
+    toc = [(1, "Hitchin fibration", 1)]
+    labels, stats = bld.align_labels(lines, toc, toc_pages={2})
+    assert labels == [bld.MASK]
+    assert stats["masked"] == 1
+
+
 def test_short_titles_do_not_mask_unrelated_lines():
     """A two-character title must not prefix-match half the document."""
     lines = [line("The quick brown fox jumps", page=0)]
