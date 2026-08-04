@@ -171,3 +171,71 @@ def test_section_label_and_strip_agree():
     label = locator.section_label(title)
     assert title.startswith(label)
     assert locator.strip_section_numbers(title) == title[len(label):].strip()
+
+
+# --- word labels: "Chapter 2.", "Appendix A:" --------------------------------
+
+@pytest.mark.parametrize(
+    "title,expected",
+    [
+        ("Chapter 2. Relativistic matrix product states",
+         "Relativistic matrix product states"),
+        ("Appendix A Calculations and constructions",
+         "Calculations and constructions"),
+        ("Appendix A: Archimedeanity of the Weyl algebra",
+         "Archimedeanity of the Weyl algebra"),
+        ("Section 5 Results", "Results"),
+        ("Part II The middle game", "The middle game"),
+        ("CHAPTER 3 Applications", "Applications"),
+        ("Chapter 4. 4.2 Nested labels", "Nested labels"),
+    ],
+)
+def test_word_labels_are_stripped(title, expected):
+    """The printed heading says "Chapter 2. Foo"; the bookmark says "2 Foo"."""
+    assert locator.strip_section_numbers(title) == expected
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Appendix A",              # nothing would be left
+        "Chapter and verse",       # no number after the label
+        "Part of the problem",
+        "Chapters in history",
+        "Sectional analysis",
+    ],
+)
+def test_word_labels_that_are_not_labels_survive(title):
+    assert locator.strip_section_numbers(title) == title
+
+
+def test_the_numeric_rule_is_unchanged():
+    assert locator.strip_section_numbers("4.1 Results") == "Results"
+    assert locator.strip_section_numbers("B. Related Work") == "Related Work"
+    assert locator.strip_section_numbers("Introduction") == "Introduction"
+
+
+def test_section_label_stays_numeric_only():
+    """number_depth is a trained feature; widening it would need a retrain."""
+    assert locator.section_label("Chapter 2. Foo") == ""
+    assert locator.section_label("4.1 Foo") == "4.1"
+
+
+def test_a_toc_entry_finds_a_chapter_labelled_heading():
+    """The contents say "2 Foo"; the page prints "Chapter 2. Foo".
+
+    Without word-label stripping the locator never matches these, and the
+    entry keeps only its printed page. 28 gold entries in the evaluation set
+    have this shape — the current detector does not fire on them, so the fix
+    is invisible end-to-end, but the locator behaviour is what it is.
+    """
+    lines = [
+        Line("Contents", 0, 72, 72, 16, True),
+        Line("2 Relativistic matrix product states .......... 5", 0, 72, 100, 10, False),
+        Line("Chapter 2. Relativistic matrix product states", 4, 72, 90, 18, True),
+        Line("Body text of the chapter.", 4, 72, 130, 10, False),
+    ]
+    entries = [OutlineEntry("2 Relativistic matrix product states", 1, printed_page=5)]
+    located, failures = locate_entries(entries, lines, skip_pages={0})
+    assert failures == 0
+    assert located[0].page == 4
