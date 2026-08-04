@@ -220,6 +220,28 @@ def test_is_low_confidence(detected, failures, used_toc, levels, page_count, exp
     assert llm.is_low_confidence(detected, failures, used_toc, levels, page_count) is expected
 
 
+@pytest.mark.parametrize(
+    "detected,page_count,threshold,expected",
+    [
+        (0, 10, 0.5, True),      # nothing detected: always worth a second opinion
+        (2, 10, 0.5, True),      # 0.2/page, sparse
+        (5, 10, 0.5, True),      # exactly at the threshold
+        (6, 10, 0.5, False),     # 0.6/page, dense enough to stand alone
+        (40, 400, 0.5, True),    # a long book with few headings is still sparse
+        (1, 10, 0.0, False),     # threshold 0 disables the rule
+        (3, 0, 0.5, False),      # a page count of 0 must not divide by zero
+    ],
+)
+def test_is_sparse_outline(detected, page_count, threshold, expected):
+    assert llm.is_sparse_outline(detected, page_count, threshold) is expected
+
+
+def test_the_default_sparse_threshold_is_the_measured_one():
+    """0.5 entries/page routes 45% of the corpus for 70% of the union's gain."""
+    assert llm.is_sparse_outline(4, 10) is True
+    assert llm.is_sparse_outline(6, 10) is False
+
+
 def test_anthropic_backend_passes_api_key(monkeypatch):
     captured = {}
     _fake_anthropic(monkeypatch, captured)

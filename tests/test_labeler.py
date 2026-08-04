@@ -3,6 +3,7 @@ import pytest
 
 from pdf_bookmarker import labeler
 from pdf_bookmarker.extractor import Line
+from pdf_bookmarker.models import OutlineEntry
 
 
 class FakeClassifier:
@@ -230,6 +231,132 @@ def test_a_labeler_that_finds_nothing_falls_back_to_the_heuristics(toc_pdf, monk
     assert result.entries              # the heuristic outline, not an error
     assert result.used_labeler is False
     assert result.used_toc is True
+
+
+# --- routing: when is the LLM worth calling on top of the labeler? -----------
+
+class FirstN:
+    """Fires on the first n lines, whatever the document — a fixed density."""
+
+    def __init__(self, n):
+        self.n = n
+
+    def predict_proba(self, X):
+        return [[0.0, 1.0] if i < self.n else [1.0, 0.0] for i in range(len(X))]
+
+
+def firing_on(n):
+    return labeler.Labeler(
+        detector=FirstN(n),
+        leveler=FakeClassifier(level=1),
+        threshold=0.5,
+        feature_names=list(labeler.FEATURE_NAMES),
+    )
+
+
+class CountingBackend:
+    """Records every call and proposes one heading the labeler cannot know."""
+
+    def __init__(self):
+        self.calls = 0
+
+    def parse_outline(self, context):
+        self.calls += 1
+        return [OutlineEntry("Invented Section", 1, printed_page=1)]
+
+
+def _run_auto(pdf, monkeypatch, model, **kwargs):
+    from pdf_bookmarker import llm as llm_module
+    from pdf_bookmarker import pipeline
+
+    backend = CountingBackend()
+    monkeypatch.setattr(pipeline, "resolve_labeler", lambda path: model)
+    monkeypatch.setattr(llm_module, "get_backend", lambda *a, **k: backend)
+    result = pipeline.process_pdf(
+        pdf, None, llm_mode="auto", api_key="test-key", **kwargs
+    )
+    return result, backend
+
+
+def test_a_dense_labeler_outline_does_not_call_the_llm(toc_pdf, monkeypatch):
+    """auto mode's whole point: skip the call when the cheap pass looks fine."""
+    result, backend = _run_auto(toc_pdf, monkeypatch, make(scores=None))
+    assert backend.calls == 0
+    assert result.used_llm is False
+    assert result.used_labeler is True
+
+
+def test_a_sparse_labeler_outline_escalates_to_the_llm(toc_pdf, monkeypatch):
+    """One heading across 5 pages is where the LLM adds the most."""
+    result, backend = _run_auto(toc_pdf, monkeypatch, firing_on(1))
+    assert backend.calls == 1
+    assert result.used_llm is True
+    assert "Invented Section" in [e.title for e in result.entries]
+
+
+def test_the_escalated_call_merges_rather_than_replaces(toc_pdf, monkeypatch):
+    """Routing must not throw away the labeler entries that triggered it."""
+    result, _ = _run_auto(toc_pdf, monkeypatch, firing_on(1))
+    assert len(result.entries) > 1
+
+
+def test_the_density_threshold_is_configurable(toc_pdf, monkeypatch):
+    """0 disables routing: the same sparse outline no longer pays for a call."""
+    result, backend = _run_auto(toc_pdf, monkeypatch, firing_on(1), llm_density=0.0)
+    assert backend.calls == 0
+    assert result.used_llm is False
+
+
+def test_a_raised_threshold_routes_a_denser_outline(toc_pdf, monkeypatch):
+    result, backend = _run_auto(toc_pdf, monkeypatch, make(scores=None), llm_density=99.0)
+    assert backend.calls == 1
+
+
+def test_the_labeler_path_ignores_the_heuristic_confidence_rule(monkeypatch):
+    """It fires on the documents that need the LLM least — measured, not assumed."""
+    from pdf_bookmarker import llm as llm_module
+    from pdf_bookmarker import pipeline
+
+    calls = []
+    monkeypatch.setattr(
+        llm_module, "is_low_confidence", lambda *a: calls.append(a) or True
+    )
+    entries = [OutlineEntry(f"H{i}", 1, page=i) for i in range(20)]
+    run, _ = pipeline.decide_llm(
+        "auto", "key", entries, 0, False, 5, "anthropic:x", used_labeler=True
+    )
+    assert calls == []      # never consulted
+    assert run is False     # 4 entries/page is dense
+
+
+def test_the_heuristic_path_still_uses_the_confidence_rule(monkeypatch):
+    """Density was measured on labeler outlines only; the other path is unchanged."""
+    from pdf_bookmarker import llm as llm_module
+    from pdf_bookmarker import pipeline
+
+    calls = []
+    monkeypatch.setattr(
+        llm_module, "is_low_confidence", lambda *a: calls.append(a) or True
+    )
+    entries = [OutlineEntry(f"H{i}", 1, page=i) for i in range(20)]
+    run, _ = pipeline.decide_llm(
+        "auto", "key", entries, 0, True, 5, "anthropic:x", used_labeler=False
+    )
+    assert len(calls) == 1
+    assert run is True
+
+
+def test_always_mode_still_calls_the_llm_on_a_dense_outline(toc_pdf, monkeypatch):
+    """--llm is an instruction, not a hint; routing must not override it."""
+    from pdf_bookmarker import llm as llm_module
+    from pdf_bookmarker import pipeline
+
+    backend = CountingBackend()
+    monkeypatch.setattr(pipeline, "resolve_labeler", lambda path: make(scores=None))
+    monkeypatch.setattr(llm_module, "get_backend", lambda *a, **k: backend)
+    result = pipeline.process_pdf(toc_pdf, None, llm_mode="always")
+    assert backend.calls == 1
+    assert result.used_llm is True
 
 
 def test_features_reach_the_model_as_float32():

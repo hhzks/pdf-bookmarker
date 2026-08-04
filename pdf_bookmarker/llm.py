@@ -227,6 +227,45 @@ def get_backend(spec: str, api_key: str | None = None, **options) -> LLMBackend:
     return backend_cls(api_key=api_key, **options)
 
 
+# Entries per page below which a line-labeler outline is worth an LLM call.
+# Measured on the 76-document evaluation set: routing by this signal is
+# sublinear, so a fraction of the calls buys a disproportionate share of the
+# union's +4.3 title F1.
+#
+#   threshold   documents routed   title F1   gain
+#      0.00            0%           0.7685      —      (labeler alone)
+#      0.25            8%           0.7829   +0.0144
+#      0.50           45%           0.7983   +0.0298
+#      1.00           80%           0.8056   +0.0372
+#      1.50           99%           0.8120   +0.0435   (quality-maximising)
+#
+# 0.5 is a cost/quality choice, not the best-scoring one: it takes 70% of the
+# gain for 45% of the calls, which is what "auto" means here. Cross-fitting the
+# threshold for quality alone picks 1.50 — i.e. "call the LLM on everything".
+# Anyone who wants that should pass it, or just use --llm.
+SPARSE_ENTRIES_PER_PAGE = 0.5
+
+
+def is_sparse_outline(
+    detected: int, page_count: int, threshold: float = SPARSE_ENTRIES_PER_PAGE
+) -> bool:
+    """Decide whether a line-labeler outline needs the LLM too (auto mode).
+
+    Density, not the structural checks `is_low_confidence` applies: those were
+    tuned for the font heuristics and are actively misleading here. On labeler
+    outlines they fire on the documents that need the LLM *least* — 26% of the
+    corpus, gaining +0.039 F1 where they fire against +0.044 where they stay
+    silent — while density at a comparable budget (22% routed) gains more.
+
+    A sparse outline means the labeler found little, which is where the LLM
+    adds most. Per page rather than in total, so a 400-page book with 40
+    headings counts as sparse and an 8-page paper with 6 does not.
+    """
+    if detected == 0:
+        return True
+    return detected / max(page_count, 1) <= threshold
+
+
 def is_low_confidence(
     detected: int,
     failures: int,

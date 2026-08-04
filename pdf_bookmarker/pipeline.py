@@ -85,10 +85,13 @@ def process_pdf(
     ocr_mode: str = "auto",  # "auto" | "force" | "never"
     ocr_max_pages: int | None = None,
     labeler_path: str | Path | None = None,
+    llm_density: float = llm.SPARSE_ENTRIES_PER_PAGE,
 ) -> PipelineResult:
     """Detect an outline in input_path and write it to output_path.
 
     output_path=None is a dry run: detect only, write nothing.
+    llm_density is the auto-mode routing threshold for the labeler path, in
+    headings per page (0 never escalates on it).
     Raises a PipelineError subclass (or llm.UnknownProviderError) on failure.
     """
     if llm_mode not in ("auto", "always", "never"):
@@ -150,7 +153,9 @@ def process_pdf(
 
         used_llm = False
         run_llm, warning = decide_llm(
-            llm_mode, api_key, entries, failures, used_toc, doc.page_count, model_spec
+            llm_mode, api_key, entries, failures, used_toc, doc.page_count, model_spec,
+            used_labeler=used_labeler,
+            density_threshold=llm_density,
         )
         if warning:
             warnings.append(warning)
@@ -242,14 +247,27 @@ def decide_llm(
     used_toc: bool,
     page_count: int,
     model_spec: str,
+    *,
+    used_labeler: bool = False,
+    density_threshold: float = llm.SPARSE_ENTRIES_PER_PAGE,
 ) -> tuple[bool, str | None]:
     """Returns (run_llm, warning)."""
     if llm_mode == "never":
         return False, None
     if llm_mode == "always":
         return True, None
-    levels = [e.level for e in entries]
-    if not llm.is_low_confidence(len(entries), failures, used_toc, levels, page_count):
+    if used_labeler:
+        # A different outline needs a different question. The structural checks
+        # below read location failures and level jumps, neither of which the
+        # labeler produces; what predicts its need for help is how little it
+        # found. See llm.is_sparse_outline for the measured curve.
+        needs_llm = llm.is_sparse_outline(len(entries), page_count, density_threshold)
+    else:
+        levels = [e.level for e in entries]
+        needs_llm = llm.is_low_confidence(
+            len(entries), failures, used_toc, levels, page_count
+        )
+    if not needs_llm:
         return False, None
     if api_key:
         return True, None
