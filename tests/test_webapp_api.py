@@ -108,13 +108,6 @@ def test_no_key_no_model_uses_server_model(client, fake_pipeline):
     assert call["model_spec"] == routes.SERVER_MODEL_SPEC
 
 
-def test_key_without_model_falls_back_to_server_model(client, fake_pipeline):
-    upload(client, llm_mode="always", api_key="user-secret")
-    call = _first_call(fake_pipeline)
-    assert call["model_spec"] == routes.SERVER_MODEL_SPEC
-    assert call["api_key"] == "user-secret"
-
-
 def test_key_with_model_is_honored(client, fake_pipeline):
     upload(client, llm_mode="always", model="anthropic:claude-sonnet-4-6",
            api_key="user-secret")
@@ -253,19 +246,6 @@ def test_startup_logs_whether_the_labeler_is_active(monkeypatch, caplog):
     assert any("labeler" in record.message.lower() for record in caplog.records)
 
 
-def test_the_server_verifies_with_the_local_qwen(monkeypatch):
-    """No key leaves the machine and no per-document cost: the served model is
-    the fine-tuned Qwen GGUF, not a cloud API."""
-    import importlib
-
-    monkeypatch.delenv("VERIFICATION_MODEL", raising=False)
-    reloaded = importlib.reload(routes)
-    try:
-        assert reloaded.SERVER_MODEL_SPEC == "local:models/outline.gguf"
-    finally:
-        importlib.reload(routes)
-
-
 def test_the_deployment_can_override_the_verification_model(monkeypatch):
     import importlib
 
@@ -304,3 +284,55 @@ def test_a_present_local_model_is_reported(monkeypatch, caplog, tmp_path):
     assert any(str(model) in record.message for record in caplog.records)
     warnings = [r.message for r in caplog.records if r.levelno >= logging.WARNING]
     assert not any("verification model" in message for message in warnings)
+
+
+# --- labeler-only deployment: the server runs no LLM of its own ---------------
+
+def test_the_server_runs_no_llm_of_its_own_by_default(monkeypatch):
+    """A CPU-bound host cannot afford a local model in the request path, and
+    the routed gain does not pay for the latency."""
+    import importlib
+
+    monkeypatch.delenv("VERIFICATION_MODEL", raising=False)
+    reloaded = importlib.reload(routes)
+    try:
+        assert reloaded.SERVER_MODEL_SPEC == ""
+    finally:
+        importlib.reload(routes)
+
+
+def test_a_keyless_job_never_reaches_the_llm(client, fake_pipeline, monkeypatch):
+    monkeypatch.setattr(routes, "SERVER_MODEL_SPEC", "")
+    upload(client, llm_mode="always")
+    assert _first_call(fake_pipeline)["llm_mode"] == "never"
+
+
+def test_a_keyless_job_still_uses_a_configured_server_model(
+    client, fake_pipeline, monkeypatch
+):
+    """Setting VERIFICATION_MODEL puts the deployment back in charge."""
+    monkeypatch.setattr(routes, "SERVER_MODEL_SPEC", "local:models/outline.gguf")
+    upload(client, llm_mode="always")
+    call = _first_call(fake_pipeline)
+    assert call["llm_mode"] == "always"
+    assert call["model_spec"] == "local:models/outline.gguf"
+
+
+def test_a_caller_with_a_key_still_gets_the_llm(client, fake_pipeline, monkeypatch):
+    monkeypatch.setattr(routes, "SERVER_MODEL_SPEC", "")
+    upload(client, llm_mode="always", model="anthropic:claude-sonnet-4-6",
+           api_key="user-secret")
+    call = _first_call(fake_pipeline)
+    assert call["llm_mode"] == "always"
+    assert call["model_spec"] == "anthropic:claude-sonnet-4-6"
+
+
+def test_a_key_without_a_model_falls_back_to_the_shipped_default(
+    client, fake_pipeline, monkeypatch
+):
+    """With no server model there is nothing to inherit, so use the CLI's."""
+    from pdf_bookmarker import llm
+
+    monkeypatch.setattr(routes, "SERVER_MODEL_SPEC", "")
+    upload(client, llm_mode="always", api_key="user-secret")
+    assert _first_call(fake_pipeline)["model_spec"] == llm.DEFAULT_MODEL_SPEC

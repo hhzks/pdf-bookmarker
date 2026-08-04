@@ -136,10 +136,14 @@ export default function App() {
 
           <fieldset className="options">
             <legend>LLM verification</legend>
+            <p className="note">
+              This server runs the heading model only — verification uses the
+              API key you provide.
+            </p>
             {[
               ["auto", "Auto: only when the detected outline looks unreliable"],
               ["always", "Always: verify every outline with the LLM"],
-              ["never", "Never: heuristics only"],
+              ["never", "Never: heading model only"],
             ].map(([value, label]) => (
               <label key={value} className="radio">
                 <input
