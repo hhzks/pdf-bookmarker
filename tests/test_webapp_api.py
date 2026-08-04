@@ -213,3 +213,40 @@ def test_ocr_unavailable_reports_friendly_error(monkeypatch):
         body = poll_until_finished(client, job_id)
         assert body["status"] == "failed"
         assert "scanned" in body["error"].lower()
+
+
+def test_a_broken_labeler_path_stops_startup(monkeypatch, tmp_path):
+    """Better one loud failure at boot than every upload failing obscurely."""
+    monkeypatch.setenv("PDF_BOOKMARKER_LABELER", str(tmp_path / "missing.joblib"))
+    with pytest.raises(RuntimeError, match="PDF_BOOKMARKER_LABELER"):
+        create_app()
+
+
+def test_startup_without_a_labeler_is_unaffected(monkeypatch):
+    monkeypatch.delenv("PDF_BOOKMARKER_LABELER", raising=False)
+    assert create_app() is not None
+
+
+def test_the_labeler_is_loaded_at_startup(monkeypatch):
+    """Validates the config and warms the cache, so no job pays the load."""
+    from app import main as main_module
+
+    calls = []
+    monkeypatch.setattr(
+        main_module, "resolve_labeler", lambda path: calls.append(path) or "model"
+    )
+    create_app()
+    assert calls == [None]  # resolved from the environment, not a hardcoded path
+
+
+def test_startup_logs_whether_the_labeler_is_active(monkeypatch, caplog):
+    """create_app runs at import, before uvicorn configures logging; a status
+    line emitted there is swallowed and the operator never sees it."""
+    import logging
+
+    monkeypatch.delenv("PDF_BOOKMARKER_LABELER", raising=False)
+    app = create_app()
+    with caplog.at_level(logging.INFO, logger="pdf_bookmarker.web"):
+        with TestClient(app):
+            pass
+    assert any("labeler" in record.message.lower() for record in caplog.records)

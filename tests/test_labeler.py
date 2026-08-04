@@ -381,3 +381,69 @@ def test_features_reach_the_model_as_float32():
     )
     model.detect(lines(), page_count=4)
     assert captured["dtype"] == numpy.float32
+
+
+# --- loading once, not per document -------------------------------------------
+
+@pytest.fixture
+def clean_cache(monkeypatch):
+    from pdf_bookmarker import pipeline
+
+    monkeypatch.setattr(pipeline, "_CACHED_LABELER", None, raising=False)
+
+
+def _count_loads(monkeypatch):
+    from pdf_bookmarker import pipeline
+
+    loaded = []
+    monkeypatch.setattr(
+        pipeline.labeler_module.Labeler, "load",
+        classmethod(lambda cls, path: loaded.append(str(path)) or "the model"),
+    )
+    return loaded
+
+
+def test_the_model_is_loaded_once_across_calls(tmp_path, monkeypatch, clean_cache):
+    """A web worker resolves per job; unpickling the bundle each time is waste."""
+    from pdf_bookmarker import pipeline
+
+    path = tmp_path / "m.joblib"
+    path.write_bytes(b"x")
+    loaded = _count_loads(monkeypatch)
+    assert pipeline.resolve_labeler(path) == "the model"
+    assert pipeline.resolve_labeler(path) == "the model"
+    assert len(loaded) == 1
+
+
+def test_a_changed_model_file_is_reloaded(tmp_path, monkeypatch, clean_cache):
+    """Swapping the model in place must not need a restart to take effect."""
+    from pdf_bookmarker import pipeline
+
+    path = tmp_path / "m.joblib"
+    path.write_bytes(b"x")
+    loaded = _count_loads(monkeypatch)
+    pipeline.resolve_labeler(path)
+    path.write_bytes(b"a longer bundle")
+    pipeline.resolve_labeler(path)
+    assert len(loaded) == 2
+
+
+def test_a_second_path_is_loaded_separately(tmp_path, monkeypatch, clean_cache):
+    from pdf_bookmarker import pipeline
+
+    first, second = tmp_path / "a.joblib", tmp_path / "b.joblib"
+    first.write_bytes(b"x")
+    second.write_bytes(b"y")
+    loaded = _count_loads(monkeypatch)
+    pipeline.resolve_labeler(first)
+    pipeline.resolve_labeler(second)
+    pipeline.resolve_labeler(first)
+    assert len(loaded) == 3
+
+
+def test_a_missing_model_still_raises(tmp_path, monkeypatch, clean_cache):
+    """Caching must not swallow a path that stopped existing."""
+    from pdf_bookmarker import pipeline
+
+    with pytest.raises(labeler.LabelerError, match="not found"):
+        pipeline.resolve_labeler(tmp_path / "gone.joblib")

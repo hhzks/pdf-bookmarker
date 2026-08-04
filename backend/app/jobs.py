@@ -9,6 +9,7 @@ from pathlib import Path
 from threading import Lock
 
 from pdf_bookmarker import llm, pipeline
+from pdf_bookmarker.labeler import LabelerError
 from pdf_bookmarker.pipeline import process_pdf
 
 
@@ -49,6 +50,9 @@ _FRIENDLY: list[tuple[type[Exception], str]] = [
      "the server). Try a shorter document."),
     (pipeline.OcrUnavailableError,
      "This server can't process scanned PDFs right now."),
+    # create_app validates the path at startup, so this only fires if the model
+    # file disappears under a running server — an operator problem either way.
+    (LabelerError, "The heading model is unavailable on this server."),
 ]
 
 
