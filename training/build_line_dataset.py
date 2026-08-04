@@ -71,7 +71,7 @@ def align_labels(
     lines: list[Line],
     toc: list,
     max_level: int = _MAX_LEVEL,
-    mask_unaligned: bool = True,
+    mask_unaligned: bool = False,
     toc_pages: set[int] | None = None,
 ) -> tuple[list[int], dict[str, int]]:
     """Label each line with its heading level, 0, or MASK.
@@ -83,10 +83,22 @@ def align_labels(
 
     About a fifth of bookmarks never align: the bookmark points to the wrong
     page, the extractor split the title across two lines, or it merged the
-    heading with body text sharing a baseline. Those headings are still sitting
-    in the document, and leaving them at 0 teaches the model that a real
-    heading is a negative example. With mask_unaligned the lines that plainly
-    correspond to one are labeled MASK and dropped from training instead.
+    heading with body text sharing a baseline.
+
+    mask_unaligned labels the lines that plausibly correspond to one of those
+    MASK, to drop them from training rather than teach the model that a real
+    heading is a negative example. **It is off because it was measured and it
+    does not help** — title F1 0.7671 unmasked vs 0.7578 masked, paired mean
+    -0.0093 over 76 documents, 25 worse to 18 better. The premise turned out to
+    be wrong: most unaligned bookmarks have no heading line to recover (it was
+    never extracted, or the only match is the contents row), so removing
+    candidate lines costs more in lost negatives than it recovers in label
+    noise. Kept, tested and documented in case a better matcher revisits it.
+
+    Note the validation line-F1 *rises* under masking (0.7160 -> 0.7267) while
+    the test score falls. That is an artifact, not a signal: masking removes
+    rows from the validation set too, so the two runs are not scored on the
+    same data. Only the test score, whose rows are never masked, compares.
     """
     labels = [0] * len(lines)
     by_page: dict[int, list[int]] = {}
