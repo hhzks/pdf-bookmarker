@@ -93,6 +93,29 @@ Predictions must also be generated at **the same quantization the adapter was
 trained at** — `predict.py --no-4bit` against a 4-bit QLoRA adapter cost 8.3 F1
 on an otherwise identical run.
 
+### Comparing two prediction sets
+
+```bash
+python training/compare.py records.jsonl baseline.jsonl candidate.jsonl --ignore-section-numbers
+```
+
+`evaluate.py` gives one macro average; `compare.py` gives the paired verdict —
+`baseline -> candidate`, the per-document mean delta, a bootstrap 95% interval
+and the win/loss/tie split — which is the form every claim in this project is
+recorded in. **Do not compare two `evaluate.py` runs by subtracting their
+averages.** The largest effect measured here is about two F1 points over 76
+documents, well inside document-to-document variance, and two changes can move
+the average identically while one wins broadly and the other rides three
+outliers.
+
+It scores through `evaluate.score_outline`, so a comparison and a headline
+number cannot drift apart, and it refuses three ways of overstating a result:
+documents only one side predicted are dropped rather than counted as zero, a
+metric that is undefined for a document (`level_accuracy` when nothing matched)
+drops from that metric alone, and the `baseline`/`candidate` averages it prints
+cover exactly the paired documents, so the arrow always equals the delta. The
+interval is seeded, so a published number reproduces.
+
 ## 5. Distill silver labels (optional)
 
 Bookmarked corpora over-represent the TOC path, so the heading-candidate path

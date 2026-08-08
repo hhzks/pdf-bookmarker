@@ -1,4 +1,8 @@
-"""Text extraction with font metadata. This is the seam where OCR would plug in."""
+"""Text extraction with font metadata.
+
+The born-digital half of the extraction seam; ocr.py is the other. Both feed
+lines_from_blocks, so either path yields identical Line objects.
+"""
 import unicodedata
 from dataclasses import dataclass
 
