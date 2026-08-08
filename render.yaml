@@ -8,11 +8,7 @@ services:
     envVars:
       - key: ALLOWED_ORIGINS
         sync: false
-      - key: ANTHROPIC_API_KEY
-        sync: false
-      - key: GEMINI_API_KEY
-        sync: false
       - key: VERIFICATION_MODEL
-        sync: false   # optional; defaults to gemini:gemini-3.5-flash
+        sync: false   # optional; unset means no server-side LLM
       - key: OCR_MAX_PAGES
         sync: false   # optional; defaults to 50
