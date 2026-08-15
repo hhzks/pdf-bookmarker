@@ -14,9 +14,13 @@ row end-to-end through `process_pdf` so they compare like with like
     this              0.8009   precision 0.8802,         0.8928
     this + the LLM    see merge.merge_outlines
 
-The LLM row is the GGUF that ships, not the 4-bit adapter it was merged from:
-the adapter scores 0.7665 on the same set, and an older 0.7642 for it is what
-this file used to quote. They are not interchangeable, so say which.
+The LLM row is the GGUF that ships, not the 4-bit adapter it was merged from,
+which scores 0.7665 on the same set (an older 0.7642 for the adapter is what
+this file used to quote). Say which you mean — but do not read that gap as the
+GGUF being better: paired, it is +0.0368 with CI [-0.0139, +0.0904], and it is
+worse on 40 documents against 25 better. It wins on average by riding a few
+large wins. Where the two genuinely differ is page numbers, and there the GGUF
+is far worse — see issue #17.
 
 The model is a pair of fitted scikit-learn estimators produced by
 `training/train_line_labeler.py --save-model`. scikit-learn and joblib are the

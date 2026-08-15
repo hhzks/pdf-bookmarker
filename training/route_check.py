@@ -113,7 +113,12 @@ def run_config(
         "recall": avg("recall"),
         "level_accuracy": avg("level_accuracy"),
         "failed": failed,
+        # Kept per document because the macro averages do not settle anything
+        # at this corpus size -- a routing change has to be paired to be
+        # believed. level_accuracy is None when a document matched no titles,
+        # and stays None here rather than becoming a zero.
         "per_document_f1": [s["f1"] for s in scores],
+        "per_document_level": [s["level_accuracy"] for s in scores],
     }
 
 
