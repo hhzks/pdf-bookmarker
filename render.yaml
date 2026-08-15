@@ -8,6 +8,14 @@ services:
     envVars:
       - key: ALLOWED_ORIGINS
         sync: false
+      - key: PDF_BOOKMARKER_LABELER
+        # Must match where backend/Dockerfile puts the release asset.
+        value: /srv/models/labeler.joblib
+      - key: REQUIRE_LABELER
+        # This deployment exists to serve the heading model, so a build that
+        # somehow lacks it should fail to boot rather than quietly answer with
+        # font heuristics (0.6205 title F1 against 0.8009).
+        value: "true"
       - key: VERIFICATION_MODEL
         sync: false   # optional; unset means no server-side LLM
       - key: OCR_MAX_PAGES

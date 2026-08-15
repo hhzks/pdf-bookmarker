@@ -74,6 +74,9 @@ def create_app(
     return app
 
 
+_TRUTHY = {"1", "true", "yes", "on"}
+
+
 def _load_labeler() -> str:
     """Resolve the configured line labeler at boot: validate it and warm it.
 
@@ -83,8 +86,16 @@ def _load_labeler() -> str:
     the operator's mistake obvious to the operator. It also pays the unpickling
     cost once, before any request is waiting on it.
 
+    An *unset* path is a different case: it is a legitimate heuristics-only
+    deployment, so it only logs. That is the right default for someone who
+    never asked for a model and the wrong one for a deployment built around it,
+    which degrades from 0.8009 title F1 to 0.6208 while still looking healthy.
+    `REQUIRE_LABELER` is how such a deployment says so — it turns the silent
+    degrade into the same loud boot failure a broken path already gets.
+
     Returns the line to log once logging is configured (see lifespan).
     """
+    required = os.environ.get("REQUIRE_LABELER", "").strip().lower() in _TRUTHY
     try:
         model = resolve_labeler(None)
     except LabelerError as exc:
@@ -92,6 +103,14 @@ def _load_labeler() -> str:
             f"PDF_BOOKMARKER_LABELER is set but the model cannot be used: {exc}"
         ) from exc
     if model is None:
+        if required:
+            raise RuntimeError(
+                "REQUIRE_LABELER is set but PDF_BOOKMARKER_LABELER is not, so "
+                "this server would answer every job with font heuristics "
+                "(0.6208 title F1 against the heading model's 0.8009). Point "
+                "PDF_BOOKMARKER_LABELER at the model, or unset REQUIRE_LABELER "
+                "to allow a heuristics-only deployment."
+            )
         return (
             "no line labeler configured (PDF_BOOKMARKER_LABELER); the pipeline "
             "will use TOC parsing and font heuristics"

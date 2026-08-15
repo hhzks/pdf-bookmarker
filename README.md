@@ -152,6 +152,7 @@ Web UI lives in `frontend/` (React + Vite) with a FastAPI backend in `backend/`.
 |---|---|
 | `ALLOWED_ORIGINS` | comma-separated CORS allowlist; unset blocks other origins |
 | `PDF_BOOKMARKER_LABELER` | path to the heading model; unset means heuristics only |
+| `REQUIRE_LABELER` | refuse to boot without a working heading model |
 | `VERIFICATION_MODEL` | server-side LLM; **unset by default — the server runs none** |
 | `PDF_BOOKMARKER_LOCAL_N_GPU_LAYERS` | GPU offload for a local model (`-1` = all) |
 | `OCR_MAX_PAGES` | reject scanned PDFs longer than this (default 50) |
@@ -160,6 +161,26 @@ The labeler is loaded and validated once at startup: a path that cannot be used
 stops the server there, rather than failing every upload with a message about a
 model the user never asked for. Replacing the file on disk is picked up without
 a restart.
+
+An *unset* path is treated differently, because heuristics-only is a legitimate
+way to run this server. That default is wrong for a deployment built around the
+model — it would answer every job at 0.6208 title F1 instead of 0.8009 and look
+healthy doing it — so such a deployment sets `REQUIRE_LABELER=true` and gets a
+boot failure instead. `render.yaml` sets it.
+
+### The heading model in the image
+
+`backend/Dockerfile` installs the `labeler` extra and downloads the model from
+the [`labeler-v1`](https://github.com/hhzks/pdf-bookmarker/releases/tag/labeler-v1)
+release, checking it against a pinned SHA-256 so the image either has the exact
+model that was measured or fails to build. The model is not tracked in git: it
+is ~5 MB of fitted estimators that a retrain replaces wholesale.
+
+scikit-learn is pinned to the version that fitted the bundle. It is pickled
+estimators, and unpickling across scikit-learn versions is not guaranteed — the
+pin keeps an unrelated upstream release from breaking a deploy. **Retraining
+means a new release and three edits in step:** upload the asset, then update
+`LABELER_VERSION` and `LABELER_SHA256` in the Dockerfile.
 
 **The deployed server runs no LLM of its own.** The heading model produces the
 outline; verification happens only when a caller supplies their own API key.
