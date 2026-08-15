@@ -1,19 +1,20 @@
 """Combine two outlines of the same document into one.
 
-Two detectors of the same PDF disagree more than they overlap. Measured on the
-77-document evaluation set, a line-labeling detector and the LLM proposed 2752
-distinct titles between them and agreed on only 62.7% — 19.1% came from one,
-18.1% from the other. Taking the union rather than letting the second replace
-the first trades precision for recall.
+Two detectors of the same PDF disagree far more than they overlap. Measured on
+the 76-document evaluation set, the shipped labeler and the shipped GGUF
+proposed 3665 distinct titles between them and agreed on only **30.8%** —
+34.6% came from the labeler alone, 34.7% from the LLM alone. Taking the union
+rather than letting the second replace the first trades precision for recall.
 
-That complementarity is why this exists, but **the size of the win depends on
-the detector and has shrunk**. It was +4.3 title F1 (0.7671 -> 0.8103, recall
-0.7343 -> 0.8525) against the labeler of the day. Re-measured end-to-end
-against the shipped one it is 0.8009 -> 0.8124 at the default routing, and the
-gain no longer clears noise (CI [-0.0069, +0.0318]). The merge earns its place
-on sparse documents, which is what `--llm-density` routes to it. Any figure
-here is only true of the labeler it was measured against, so re-run
-`training/route_check.py` before quoting one.
+That complementarity is what this is for, and it pays: end-to-end,
+0.8009 -> 0.8312 with `--llm` (+0.0303, CI [+0.0092, +0.0525]) and
+0.8009 -> 0.8211 at the default routing (+0.0202, CI [+0.0000, +0.0418]).
+Recall carries it, 0.7664 -> 0.8470.
+
+Any figure here is only true of the pair it was measured on, so re-run
+`training/route_check.py` before quoting one — and check what the prediction
+file actually contains. A file labelled as the GGUF's output but holding a
+labeler union made this merge look worthless for eleven days (issue #17).
 
 The primary outline is the one whose positions are trusted: its entries are
 kept verbatim, and the secondary only contributes headings the primary never
