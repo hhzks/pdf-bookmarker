@@ -5,12 +5,18 @@ reads the outline straight off the labels. Two consequences matter downstream:
 titles are the page's own text, so they are exact by construction, and each
 entry already knows its physical page — the locator has nothing to do.
 
-Measured on the 76-document evaluation set (`--ignore-section-numbers`):
+Measured on the 76-document evaluation set (`--ignore-section-numbers`), every
+row end-to-end through `process_pdf` so they compare like with like
+(`training/route_check.py`):
 
-    font heuristics   0.6205 title F1
-    LLM (Qwen3.5-2B)  0.7642
-    this              0.8009   precision 0.8802, level accuracy 0.8928
+    font heuristics   0.6208 title F1, level accuracy 0.8218
+    LLM (shipped GGUF)0.7970                             0.8181
+    this              0.8009   precision 0.8802,         0.8928
     this + the LLM    see merge.merge_outlines
+
+The LLM row is the GGUF that ships, not the 4-bit adapter it was merged from:
+the adapter scores 0.7665 on the same set, and an older 0.7642 for it is what
+this file used to quote. They are not interchangeable, so say which.
 
 The model is a pair of fitted scikit-learn estimators produced by
 `training/train_line_labeler.py --save-model`. scikit-learn and joblib are the
