@@ -136,9 +136,14 @@ def main(argv: list[str] | None = None) -> int:
     if args.gguf:
         with open(args.output, mode, encoding="utf-8") as out:
             def write(record, entries, parse_error):
+                # `model` is provenance, not data. A prediction file that does
+                # not say what produced it cannot be told apart from one
+                # produced by something else -- which is exactly how a labeler
+                # union spent eleven days being read as this model's output.
+                # evaluate.py and compare.py read sha256/entries and ignore it.
                 out.write(json.dumps(
                     {"sha256": record["sha256"], "entries": entries,
-                     "parse_error": parse_error},
+                     "parse_error": parse_error, "model": str(args.adapter)},
                     ensure_ascii=False) + "\n")
                 out.flush()  # a long run should survive being cut off
 

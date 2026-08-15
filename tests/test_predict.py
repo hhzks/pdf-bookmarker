@@ -105,3 +105,29 @@ def test_gguf_parse_failure_is_recorded_not_crashed(tmp_path, monkeypatch):
     ]) == 0
     row = json.loads(out.read_text(encoding="utf-8").splitlines()[0])
     assert row["parse_error"] is True and row["entries"] == []
+
+
+def test_predictions_record_which_model_made_them(tmp_path, monkeypatch):
+    """The contaminated file survived because a prediction file says nothing
+    about where it came from. Extra keys are ignored by evaluate.py and
+    compare.py, which read sha256/entries only."""
+    from pdf_bookmarker.models import OutlineEntry
+
+    class FakeBackend:
+        def __init__(self, model, **kwargs):
+            pass
+
+        def parse_outline(self, context):
+            return [OutlineEntry(title="Introduction", level=1)]
+
+    monkeypatch.setattr(predict, "LocalBackend", FakeBackend)
+    records = tmp_path / "records.jsonl"
+    records.write_text(
+        json.dumps({"sha256": "a", "context": "x", "entries": []}) + "\n",
+        encoding="utf-8",
+    )
+    gguf = tmp_path / "outline.gguf"
+    out = tmp_path / "preds.jsonl"
+    predict.main([str(records), str(gguf), "-o", str(out), "--gguf"])
+    row = json.loads(out.read_text(encoding="utf-8").splitlines()[0])
+    assert row["model"] == str(gguf)
