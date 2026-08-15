@@ -137,7 +137,7 @@ def process_pdf(
         used_labeler = False
         entries = []
         if model is not None:
-            # The labeler beats the heuristic path outright (0.7671 vs 0.6205
+            # The labeler beats the heuristic path outright (0.8009 vs 0.6208
             # title F1) and its entries already carry an exact physical page,
             # so there is nothing for the locator to do and no TOC to parse.
             toc_pages = toc_detector.find_toc_pages(lines, doc.page_count)
@@ -167,9 +167,17 @@ def process_pdf(
                     llm_entries, lines, skip_pages=set(toc_pages)
                 )
                 if used_labeler:
-                    # Two precise detectors that overlap on only 63% of titles:
-                    # the union is worth +4.3 title F1 (0.7671 -> 0.8104), almost
-                    # all recall. The labeler leads because its pages are exact.
+                    # Two precise detectors that overlap on only 63% of titles,
+                    # so the union trades precision for recall: 0.8009 -> 0.8124
+                    # at the default routing, recall 0.7664 -> 0.8123. The
+                    # labeler leads because its pages are exact.
+                    #
+                    # Against the shipped labeler that gain no longer clears
+                    # noise (CI [-0.0069, +0.0318]); it was +4.3 F1 against a
+                    # weaker one. The merge stays because it is where the
+                    # sparse-document insurance lives, not for the macro number
+                    # -- re-run training/route_check.py before quoting either,
+                    # since neither figure survives a labeler change.
                     #
                     # This merge is deliberately NOT applied to the heuristic
                     # outline. Merging that in instead costs 6.1 F1, because its

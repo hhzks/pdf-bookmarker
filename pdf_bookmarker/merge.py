@@ -4,8 +4,16 @@ Two detectors of the same PDF disagree more than they overlap. Measured on the
 77-document evaluation set, a line-labeling detector and the LLM proposed 2752
 distinct titles between them and agreed on only 62.7% — 19.1% came from one,
 18.1% from the other. Taking the union rather than letting the second replace
-the first is worth +4.3 title F1 (0.7671 -> 0.8103), almost all of it recall
-(0.7343 -> 0.8525), against roughly 2 points of precision.
+the first trades precision for recall.
+
+That complementarity is why this exists, but **the size of the win depends on
+the detector and has shrunk**. It was +4.3 title F1 (0.7671 -> 0.8103, recall
+0.7343 -> 0.8525) against the labeler of the day. Re-measured end-to-end
+against the shipped one it is 0.8009 -> 0.8124 at the default routing, and the
+gain no longer clears noise (CI [-0.0069, +0.0318]). The merge earns its place
+on sparse documents, which is what `--llm-density` routes to it. Any figure
+here is only true of the labeler it was measured against, so re-run
+`training/route_check.py` before quoting one.
 
 The primary outline is the one whose positions are trusted: its entries are
 kept verbatim, and the secondary only contributes headings the primary never

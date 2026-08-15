@@ -75,32 +75,47 @@ it afterwards. It is a ~5 MB gradient-boosted tree over typography features
     pdf-bookmarker input.pdf --labeler models/labeler.joblib
 
 Or point `PDF_BOOKMARKER_LABELER` at it once and drop the flag. Measured over
-76 held-out documents (macro title F1, section numbering ignored):
+76 held-out documents (macro-averaged, section numbering ignored). Every row is
+the outline `process_pdf` actually produces — extraction, detection, locator and
+merge included — against the shipped model, so the rows are comparable to each
+other. Reproduce with `training/route_check.py`:
 
-| configuration | title F1 |
-|---|---|
-| font heuristics (default install) | 0.6205 |
-| LLM alone | 0.7642 |
-| `--labeler` | 0.7797 |
-| `--labeler` + auto mode | 0.7978 |
-| `--labeler --llm` | 0.8187 |
+| configuration | LLM calls | title F1 | level accuracy |
+|---|---|---|---|
+| font heuristics (default install) | — | 0.6208 | 0.8218 |
+| LLM alone | 100% | 0.7970 | 0.8181 |
+| `--labeler` | 0% | **0.8009** | **0.8928** |
+| `--labeler` + auto mode (default) | 38% | **0.8124** | 0.8853 |
+| `--labeler --llm` | 100% | 0.8117 | 0.8783 |
+
+The LLM row is the shipped GGUF, replayed from cached predictions so the whole
+table is one model measured one way. The heading model edges it on titles and
+beats it clearly on hierarchy, at no API cost and milliseconds per document.
 
 The two detectors miss different headings — the model cannot name a heading
 that is not a line of text, the LLM reconstructs wrapped and merged ones — so
-the outlines are merged rather than one replacing the other.
+the last two rows merge the outlines rather than letting one replace the other.
 
-Level accuracy is 0.8879. The LLM rows were measured against an earlier
-revision of the heading model (0.7685 titles, 0.8368 levels), so they
-understate the pairing slightly. The auto row is end-to-end with the shipped GGUF; the last row replayed the
-same model's predictions over every document. Paired per document, the GGUF
-and the 4-bit adapter it was merged from are indistinguishable (6 wins, 8
-losses, 62 ties; 95% CI on the difference [−0.023, +0.004]).
+The two level-accuracy figures answer different questions. **0.8928 is the
+heading model alone**; **0.8853 is end-to-end at the default routing**, where
+merging the LLM's entries in costs a little hierarchy. Neither contradicts the
+other.
 
 With a labeler configured, auto mode calls the LLM when the model found
-**0.5 headings per page or fewer**, which is where it adds most: that routes
-43% of documents and buys about three quarters of the gain. `--llm-density`
-moves the threshold (`0` never escalates; `1.5` maximises quality and escalates
-on nearly everything, i.e. `--llm`).
+**0.5 headings per page or fewer**. That routes 38% of documents, and it is the
+peak of the curve rather than a compromise on it — escalating more buys nothing
+measurable (0.8112 at `1.0`, 0.8117 at `--llm`) and costs 2.6x the calls.
+`--llm-density` moves the threshold; `0` never escalates.
+
+**Be careful reading the last two rows as a gain.** Paired per document, the
+default's +0.0115 over the labeler alone has a 95% CI of [−0.0069, +0.0318]
+(16 documents better, 9 worse, 51 unchanged) — the union is no longer
+distinguishable from the model alone on a set this size. Only the smallest
+budget is individually significant (`--llm-density 0.25`, 8% routed, +0.0086,
+CI [+0.0010, +0.0192], 5 better against 1 worse). This is a change from earlier
+revisions of this table: as the heading model improved, the LLM's marginal
+contribution shrank. Treat the LLM pass as insurance for documents where the
+model finds little, which is exactly what routing on density selects for.
 
 Train one with `training/train_line_labeler.py --save-model` (see
 `training/README.md`); the bundle records the feature set it was fitted on and
