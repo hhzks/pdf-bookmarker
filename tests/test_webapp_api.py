@@ -218,6 +218,34 @@ def test_a_broken_labeler_path_stops_startup(monkeypatch, tmp_path):
 
 def test_startup_without_a_labeler_is_unaffected(monkeypatch):
     monkeypatch.delenv("PDF_BOOKMARKER_LABELER", raising=False)
+    monkeypatch.delenv("REQUIRE_LABELER", raising=False)
+    assert create_app() is not None
+
+
+def test_require_labeler_turns_a_silent_degrade_into_a_boot_failure(monkeypatch):
+    """A deploy that meant to serve the model should not quietly serve
+    heuristics instead — that is 0.62 title F1 against 0.80, and it looks
+    healthy."""
+    monkeypatch.delenv("PDF_BOOKMARKER_LABELER", raising=False)
+    monkeypatch.setenv("REQUIRE_LABELER", "true")
+    with pytest.raises(RuntimeError, match="REQUIRE_LABELER"):
+        create_app()
+
+
+def test_require_labeler_is_satisfied_by_a_working_model(monkeypatch):
+    from app import main as main_module
+
+    monkeypatch.setenv("REQUIRE_LABELER", "1")
+    monkeypatch.setenv("PDF_BOOKMARKER_LABELER", "/models/labeler.joblib")
+    monkeypatch.setattr(main_module, "resolve_labeler", lambda path: "model")
+    assert create_app() is not None
+
+
+@pytest.mark.parametrize("value", ["", "0", "false", "no", "off"])
+def test_require_labeler_stays_off_unless_explicitly_enabled(monkeypatch, value):
+    """An unset-or-falsey flag must not break deployments that never asked."""
+    monkeypatch.delenv("PDF_BOOKMARKER_LABELER", raising=False)
+    monkeypatch.setenv("REQUIRE_LABELER", value)
     assert create_app() is not None
 
 
