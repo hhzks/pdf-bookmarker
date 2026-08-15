@@ -10,17 +10,20 @@ row end-to-end through `process_pdf` so they compare like with like
 (`training/route_check.py`):
 
     font heuristics   0.6208 title F1, level accuracy 0.8218
-    LLM (shipped GGUF)0.7970                             0.8181
+    LLM (shipped GGUF)0.7637                             0.7546
     this              0.8009   precision 0.8802,         0.8928
-    this + the LLM    see merge.merge_outlines
+    this + the LLM    0.8312 at --llm; see merge.merge_outlines
 
-The LLM row is the GGUF that ships, not the 4-bit adapter it was merged from,
-which scores 0.7665 on the same set (an older 0.7642 for the adapter is what
-this file used to quote). Say which you mean — but do not read that gap as the
-GGUF being better: paired, it is +0.0368 with CI [-0.0139, +0.0904], and it is
-worse on 40 documents against 25 better. It wins on average by riding a few
-large wins. Where the two genuinely differ is page numbers, and there the GGUF
-is far worse — see issue #17.
+The two are **tied on titles** (+0.0372 for this model, CI [-0.0133, +0.0876],
+31 documents better against 31) and this model is clearly ahead on hierarchy
+(+0.1382, CI [+0.0715, +0.2122]). It is the levels, the exact pages and the
+cost that justify it, not the title score.
+
+The LLM row is the GGUF that ships. The 4-bit adapter it was merged from is
+**indistinguishable** from it — +0.0013 title F1, CI [-0.0306, +0.0349], with
+43 of 76 documents scoring identically — so either may be quoted, but say
+which. (A file claiming to be the GGUF's predictions was in fact a labeler
+union, and briefly made the two look 3.7 F1 apart; see issue #17.)
 
 The model is a pair of fitted scikit-learn estimators produced by
 `training/train_line_labeler.py --save-model`. scikit-learn and joblib are the

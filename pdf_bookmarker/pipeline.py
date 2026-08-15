@@ -167,17 +167,13 @@ def process_pdf(
                     llm_entries, lines, skip_pages=set(toc_pages)
                 )
                 if used_labeler:
-                    # Two precise detectors that overlap on only 63% of titles,
-                    # so the union trades precision for recall: 0.8009 -> 0.8124
-                    # at the default routing, recall 0.7664 -> 0.8123. The
-                    # labeler leads because its pages are exact.
-                    #
-                    # Against the shipped labeler that gain no longer clears
-                    # noise (CI [-0.0069, +0.0318]); it was +4.3 F1 against a
-                    # weaker one. The merge stays because it is where the
-                    # sparse-document insurance lives, not for the macro number
-                    # -- re-run training/route_check.py before quoting either,
-                    # since neither figure survives a labeler change.
+                    # Two precise detectors that agree on only 31% of proposed
+                    # titles, so the union trades precision for recall:
+                    # 0.8009 -> 0.8211 at the default routing (+0.0202, CI
+                    # [+0.0000, +0.0418]) and 0.8312 with --llm, recall
+                    # 0.7664 -> 0.8470. The labeler leads because its pages are
+                    # exact. Re-run training/route_check.py before quoting
+                    # these; they do not survive a labeler change.
                     #
                     # This merge is deliberately NOT applied to the heuristic
                     # outline. Merging that in instead costs 6.1 F1, because its
