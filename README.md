@@ -89,8 +89,12 @@ other. Reproduce with `training/route_check.py`:
 | `--labeler --llm` | 100% | 0.8117 | 0.8783 |
 
 The LLM row is the shipped GGUF, replayed from cached predictions so the whole
-table is one model measured one way. The heading model edges it on titles and
-beats it clearly on hierarchy, at no API cost and milliseconds per document.
+table is one model measured one way. **On titles the two are tied** — paired
+per document, +0.0039 for the heading model with a 95% CI of [−0.0196,
++0.0263], 28 documents better against 26. Its advantage is everything else:
+hierarchy (+0.0747, CI [+0.0464, +0.1060], 39 better against 5), exact physical
+pages by construction, no API key, and milliseconds per document against
+minutes.
 
 The two detectors miss different headings — the model cannot name a heading
 that is not a line of text, the LLM reconstructs wrapped and merged ones — so
@@ -199,8 +203,11 @@ means a new release and three edits in step:** upload the asset, then update
 
 **The deployed server runs no LLM of its own.** The heading model produces the
 outline; verification happens only when a caller supplies their own API key.
-On a CPU host the local GGUF costs minutes per document for roughly 3 title F1,
-which is not a trade worth making by default. Setting `VERIFICATION_MODEL`
+On a CPU host the local GGUF costs minutes per document for +0.0115 title F1 at
+the default routing — an interval that spans zero — which is not a trade worth
+making by default. (That was believed to be roughly 3 F1 when this default was
+chosen; re-measuring against the current heading model made the case stronger,
+not weaker.) Setting `VERIFICATION_MODEL`
 turns it back on — worthwhile on a GPU host — in which case the model is
 *checked* at startup but not loaded, and a missing file is a warning rather
 than a failure. (The frontend's "This server runs the heading model only" note
