@@ -20,9 +20,40 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from pdf_bookmarker.llm import PROMPT, Outline
+from pdf_bookmarker.llm import PROMPT, LocalBackend, Outline
 
 DEFAULT_BASE_MODEL = "Qwen/Qwen3.5-2B"  # keep in sync with finetune.py
+
+
+def predict_gguf(records, model_path, n_gpu_layers, write):
+    """Predict with an exported GGUF, through the backend that serves it.
+
+    Deliberately `LocalBackend` and not a private llama.cpp loop: the point of
+    a GGUF prediction file is to say what a user running
+    `--model local:outline.gguf` would get, which includes the grammar
+    constraint and the shipped prompt. A parallel implementation here could
+    drift from serving and the numbers would silently stop meaning that.
+
+    This exists because it did not. `preds_gguf_qwen35.jsonl` was produced
+    outside any committed tool and was in fact a labeler-union outline; it was
+    read as the model's own output for days (issue #17).
+    """
+    backend = LocalBackend(str(model_path), n_gpu_layers=n_gpu_layers)
+    parse_errors = 0
+    for i, record in enumerate(records, 1):
+        try:
+            entries = [
+                {"title": e.title, "level": e.level, "printed_page": e.printed_page}
+                for e in backend.parse_outline(record["context"])
+            ]
+            parse_error = False
+        except Exception as exc:  # grammar makes this unlikely, not impossible
+            print(f"  parse failure on {record['sha256'][:8]}: {exc}", file=sys.stderr)
+            entries, parse_error = [], True
+            parse_errors += 1
+        write(record, entries, parse_error)
+        print(f"  [{i}/{len(records)}] {len(entries)} entries", file=sys.stderr)
+    return parse_errors
 
 
 def parse_generation(text: str) -> list[dict] | None:
@@ -67,7 +98,14 @@ def load_records(records_path: Path, split_path: Path | None) -> list[dict]:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("records", type=Path, help="harvest records.jsonl")
-    parser.add_argument("adapter", type=Path, help="LoRA adapter directory")
+    parser.add_argument("adapter", type=Path,
+                        help="LoRA adapter directory, or a .gguf file with --gguf")
+    parser.add_argument("--gguf", action="store_true",
+                        help="treat the model argument as an exported GGUF and "
+                        "predict through pdf_bookmarker's LocalBackend — the "
+                        "same path that serves --model local:...")
+    parser.add_argument("--n-gpu-layers", type=int, default=-1,
+                        help="GGUF only; -1 offloads every layer (default)")
     parser.add_argument("-o", "--output", type=Path, required=True)
     parser.add_argument("--split", type=Path, default=None,
                         help="SFT split file; only predict its documents")
@@ -94,6 +132,21 @@ def main(argv: list[str] | None = None) -> int:
         print("no records to predict", file=sys.stderr)
         return 1
     print(f"predicting {len(records)} documents", file=sys.stderr)
+
+    if args.gguf:
+        with open(args.output, mode, encoding="utf-8") as out:
+            def write(record, entries, parse_error):
+                out.write(json.dumps(
+                    {"sha256": record["sha256"], "entries": entries,
+                     "parse_error": parse_error},
+                    ensure_ascii=False) + "\n")
+                out.flush()  # a long run should survive being cut off
+
+            parse_errors = predict_gguf(
+                records, args.adapter, args.n_gpu_layers, write
+            )
+        print(f"done; {parse_errors} unparseable generations", file=sys.stderr)
+        return 0
 
     try:
         # datasets isn't needed here, but keep torch after any pyarrow users.
