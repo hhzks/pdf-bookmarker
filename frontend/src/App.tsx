@@ -1,28 +1,45 @@
 import { useEffect, useRef, useState } from "react";
 import { createJob, getJob, downloadUrl } from "./api";
+import type { JobState, LlmMode } from "./api";
 
-const MODELS = [
+interface ModelChoice {
+  value: string;
+  label: string;
+}
+
+const MODELS: ModelChoice[] = [
   { value: "anthropic:claude-opus-4-8", label: "Claude Opus 4.8" },
   { value: "anthropic:claude-sonnet-4-6", label: "Claude Sonnet 4.6" },
   { value: "gemini:gemini-3.5-flash", label: "Gemini 3.5 Flash" },
 ];
 
+const LLM_MODES: [LlmMode, string][] = [
+  ["auto", "Auto: only when the detected outline looks unreliable"],
+  ["always", "Always: verify every outline with the LLM"],
+  ["never", "Never: heading model only"],
+];
+
+type Phase = "idle" | "uploading" | "processing" | "done" | "failed";
+
 const POLL_MS = 1500;
 
+function message(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
 export default function App() {
-  // idle | uploading | processing | done | failed
-  const [phase, setPhase] = useState("idle");
-  const [file, setFile] = useState(null);
-  const [llmMode, setLlmMode] = useState("auto");
+  const [phase, setPhase] = useState<Phase>("idle");
+  const [file, setFile] = useState<File | null>(null);
+  const [llmMode, setLlmMode] = useState<LlmMode>("auto");
   const [model, setModel] = useState(MODELS[0].value);
   const [apiKey, setApiKey] = useState("");
   const [showKeyField, setShowKeyField] = useState(false);
   const [progress, setProgress] = useState(0);
-  const [jobId, setJobId] = useState(null);
-  const [result, setResult] = useState(null);
-  const [error, setError] = useState(null);
+  const [jobId, setJobId] = useState<string | null>(null);
+  const [result, setResult] = useState<JobState | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
-  const inputRef = useRef(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (phase !== "processing" || !jobId) return;
@@ -37,16 +54,16 @@ export default function App() {
           setPhase("failed");
         }
       } catch (err) {
-        setError(err.message);
+        setError(message(err));
         setPhase("failed");
       }
     }, POLL_MS);
     return () => clearInterval(timer);
   }, [phase, jobId]);
 
-  function pickFile(f) {
+  function pickFile(f: File | undefined) {
     if (!f) return;
-    if (f && f.name.toLowerCase().endsWith(".pdf")) {
+    if (f.name.toLowerCase().endsWith(".pdf")) {
       setFile(f);
       setError(null);
     } else {
@@ -55,6 +72,7 @@ export default function App() {
   }
 
   async function start() {
+    if (!file) return;
     setPhase("uploading");
     setProgress(0);
     setError(null);
@@ -68,7 +86,7 @@ export default function App() {
       setJobId(id);
       setPhase("processing");
     } catch (err) {
-      setError(err.message);
+      setError(message(err));
       setPhase("failed");
     }
   }
@@ -107,14 +125,14 @@ export default function App() {
               }
               pickFile(e.dataTransfer.files[0]);
             }}
-            onClick={() => inputRef.current.click()}
+            onClick={() => inputRef.current?.click()}
             role="button"
             tabIndex={0}
             aria-label="Choose a PDF file"
             onKeyDown={(e) => {
               if (e.key === "Enter" || e.key === " ") {
                 e.preventDefault();
-                inputRef.current.click();
+                inputRef.current?.click();
               }
             }}
           >
@@ -123,7 +141,7 @@ export default function App() {
               type="file"
               accept="application/pdf,.pdf"
               hidden
-              onChange={(e) => pickFile(e.target.files[0])}
+              onChange={(e) => pickFile(e.target.files?.[0])}
             />
             {file ? (
               <p className="filename">{file.name}</p>
@@ -140,11 +158,7 @@ export default function App() {
               This server runs the heading model only — verification uses the
               API key you provide.
             </p>
-            {[
-              ["auto", "Auto: only when the detected outline looks unreliable"],
-              ["always", "Always: verify every outline with the LLM"],
-              ["never", "Never: heading model only"],
-            ].map(([value, label]) => (
+            {LLM_MODES.map(([value, label]) => (
               <label key={value} className="radio">
                 <input
                   type="radio"
@@ -219,10 +233,10 @@ export default function App() {
         </section>
       )}
 
-      {phase === "done" && (
+      {phase === "done" && result && jobId && (
         <section className="card center">
           <p className="success">
-            Done ({result.bookmark_count} bookmark
+            Done ({result.bookmark_count ?? 0} bookmark
             {result.bookmark_count === 1 ? "" : "s"} added)
           </p>
           <a className="primary button" href={downloadUrl(jobId)}>
