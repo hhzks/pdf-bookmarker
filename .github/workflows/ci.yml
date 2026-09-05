@@ -16,7 +16,7 @@ jobs:
       # Matches backend/Dockerfile; PyMuPDF needs this to find the language data.
       TESSDATA_PREFIX: /usr/share/tesseract-ocr/5/tessdata
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: actions/setup-python@v5
         with:
@@ -43,8 +43,13 @@ jobs:
           python -m pytest tests/test_ocr.py::test_extract_lines_via_ocr_recovers_text -q -rs | tee ocr.log
           grep -q "1 passed" ocr.log
 
+      # -rs so the skip list is in the log. Linux and Windows skip different
+      # tests and the totals happen to match (438 passed / 3 skipped on both):
+      # this runner skips test_webapp_jobs.py's Windows file-locking test and
+      # runs OCR, a dev box on Windows does the reverse. Without the reasons
+      # printed, a green run looks like OCR was skipped here too.
       - name: Run the test suite
-        run: python -m pytest
+        run: python -m pytest -rs
 
   frontend:
     runs-on: ubuntu-latest
@@ -52,9 +57,9 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: "22"
           cache: npm
