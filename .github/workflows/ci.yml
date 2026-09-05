@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    env:
+      # Matches backend/Dockerfile; PyMuPDF needs this to find the language data.
+      TESSDATA_PREFIX: /usr/share/tesseract-ocr/5/tessdata
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      # OCR shells out to the tesseract binary, so there is no Python
+      # dependency to pin and no ImportError to notice: without this the
+      # suite still passes and simply skips the one test that runs real OCR.
+      - name: Install Tesseract
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-eng
+
+      - name: Install the package
+        run: pip install -e ".[dev]"
+
+      # This job is the only place the real Tesseract call is exercised, so a
+      # skip here is a failure, not a pass. pytest exits 0 on a skip; assert
+      # the test actually ran.
+      - name: Verify the real OCR test is not skipped
+        run: |
+          set -o pipefail
+          python -m pytest tests/test_ocr.py::test_extract_lines_via_ocr_recovers_text -q -rs | tee ocr.log
+          grep -q "1 passed" ocr.log
+
+      # -rs so the skip list is in the log. Linux and Windows skip different
+      # tests and the totals happen to match (438 passed / 3 skipped on both):
+      # this runner skips test_webapp_jobs.py's Windows file-locking test and
+      # runs OCR, a dev box on Windows does the reverse. Without the reasons
+      # printed, a green run looks like OCR was skipped here too.
+      - name: Run the test suite
+        run: python -m pytest -rs
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      # `build` runs tsc --noEmit before vite build, so this is the typecheck too.
+      - name: Typecheck and build
+        run: npm run build
