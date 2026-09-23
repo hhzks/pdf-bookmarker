@@ -65,8 +65,8 @@ FEATURE_NAMES = [
     # size_ratio compares it to the *document's* body size, which cannot
     # separate a heading from an equally large line inside a figure block. A
     # heading is defined by its neighbourhood: bigger than what follows,
-    # whitespace above it, body text below. Worth +1.4 title F1 (0.7797 ->
-    # 0.7933, 32 documents better against 13, CI [+0.0018, +0.0246]).
+    # whitespace above it, body text below. Worth +2.1 title F1 (0.7797 ->
+    # 0.8009, 34 documents better against 14, CI [+0.0101, +0.0331]).
     "size_vs_next",      # the ratio that actually marks a heading
     "size_vs_prev",
     "size_vs_window",    # against the median of +/-5 lines, not the document

@@ -47,7 +47,7 @@ def merge_outlines(
     Matching is by count, not position, so a secondary "Summary" somewhere the
     primary has nothing is still absorbed if the primary already proposed as
     many. Position-aware matching would keep it, but that is not the variant
-    the +4.3 F1 was measured on, so it is not the variant that ships.
+    the union gain above was measured on, so it is not the variant that ships.
 
     Entries with no page sort last: an unlocated entry is not evidence that the
     heading belongs at the front of the document, and ordering it there would

@@ -237,7 +237,8 @@ def test_is_sparse_outline(detected, page_count, threshold, expected):
 
 
 def test_the_default_sparse_threshold_is_the_measured_one():
-    """0.5 entries/page routes 45% of the corpus for 70% of the union's gain."""
+    """0.5 entries/page routes 38% of the corpus for about two thirds of the
+    union's gain (see SPARSE_ENTRIES_PER_PAGE)."""
     assert llm.is_sparse_outline(4, 10) is True
     assert llm.is_sparse_outline(6, 10) is False
 

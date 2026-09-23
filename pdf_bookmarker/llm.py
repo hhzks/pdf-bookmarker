@@ -273,21 +273,24 @@ def _local_backend(model: str, options: dict):
 
 
 # Entries per page below which a line-labeler outline is worth an LLM call.
-# Measured on the 76-document evaluation set: routing by this signal is
-# sublinear, so a fraction of the calls buys a disproportionate share of the
-# union's +4.3 title F1.
+# Measured end-to-end on the 76-document evaluation set with
+# training/route_check.py, against the shipped (window-feature) labeler:
+# routing by this signal is sublinear, so a fraction of the calls buys a
+# disproportionate share of the union's +3.0 title F1 (--llm).
 #
 #   threshold   documents routed   title F1   gain
-#      0.00            0%           0.7685      —      (labeler alone)
-#      0.25            8%           0.7829   +0.0144
-#      0.50           45%           0.7983   +0.0298
-#      1.00           80%           0.8056   +0.0372
-#      1.50           99%           0.8120   +0.0435   (quality-maximising)
+#      0.00            0%           0.8009      —      (labeler alone)
+#      0.25            8%           0.8134   +0.0125
+#      0.50           38%           0.8211   +0.0202
+#      1.00           80%           0.8279   +0.0270
+#      1.50           99%           0.8318   +0.0309   (quality-maximising)
 #
-# 0.5 is a cost/quality choice, not the best-scoring one: it takes 70% of the
-# gain for 45% of the calls, which is what "auto" means here. Cross-fitting the
-# threshold for quality alone picks 1.50 — i.e. "call the LLM on everything".
-# Anyone who wants that should pass it, or just use --llm.
+# 0.5 is a cost/quality choice, not the best-scoring one: it takes about two
+# thirds of the gain for 38% of the calls, which is what "auto" means here.
+# Routing past it still pays — 1.50 over 0.50 is +0.0107, CI [+0.0037,
+# +0.0184] — so anyone who wants quality over cost should pass a higher
+# threshold, or just use --llm. These rows do not survive a labeler change;
+# re-run route_check.py after one.
 SPARSE_ENTRIES_PER_PAGE = 0.5
 
 

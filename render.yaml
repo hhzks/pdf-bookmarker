@@ -14,7 +14,7 @@ services:
       - key: REQUIRE_LABELER
         # This deployment exists to serve the heading model, so a build that
         # somehow lacks it should fail to boot rather than quietly answer with
-        # font heuristics (0.6205 title F1 against 0.8009).
+        # font heuristics (0.6208 title F1 against 0.8009).
         value: "true"
       - key: VERIFICATION_MODEL
         sync: false   # optional; unset means no server-side LLM

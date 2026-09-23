@@ -198,7 +198,7 @@ is ~5 MB of fitted estimators that a retrain replaces wholesale.
 scikit-learn is pinned to the version that fitted the bundle. It is pickled
 estimators, and unpickling across scikit-learn versions is not guaranteed — the
 pin keeps an unrelated upstream release from breaking a deploy. **Retraining
-means a new release and three edits in step:** upload the asset, then update
+means a new release and three changes in step:** upload the asset, then update
 `LABELER_VERSION` and `LABELER_SHA256` in the Dockerfile.
 
 **The deployed server runs no LLM of its own.** The heading model produces the

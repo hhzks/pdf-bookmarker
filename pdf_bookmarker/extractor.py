@@ -17,7 +17,8 @@ _WIDE_GAP_EMS = 2.0  # horizontal gap (in ems) marking a layout break, e.g. TOC 
 # labeler path's runtime and that decoding is ~70% of it, so dropping the bit
 # ran the 76-document evaluation set 2.81x faster (39.6s -> 14.1s, worst
 # document 14.0s -> 0.35s) for an identical outline -- title F1 0.7797 either
-# way, to six decimals.
+# way, to six decimals (the labeler of the time, before the local-contrast
+# features).
 #
 # Only the image bit goes. TEXT_PRESERVE_WHITESPACE especially has to stay:
 # LaTeX emits inter-word spaces as whitespace-only spans, and _parse_fragment

@@ -1,5 +1,10 @@
 """Routed union of the line labeler and the LLM.
 
+The figures below were measured against an earlier labeler (0.7671 title F1)
+and are kept as the record of that experiment. They do not describe what ships:
+for the current numbers (+0.0303 at --llm, +0.0202 at the default routing), see
+merge.py and re-run training/route_check.py.
+
 The two detectors disagree more than they overlap — on the 76-document
 evaluation set they proposed 2752 distinct titles and agreed on 62.7% — so
 taking the union rather than picking one is worth +4.3 title F1 (0.7671 ->
