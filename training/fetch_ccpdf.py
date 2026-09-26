@@ -35,7 +35,6 @@ import csv
 import gzip
 import io
 import json
-import re
 import sys
 import time
 import urllib.error
@@ -48,14 +47,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import fitz
 
 from pdf_bookmarker import extractor
+from pdf_bookmarker.producer import is_tex
 
 BASE_URL = ("https://digitalcorpora.s3.amazonaws.com/corpora/files/"
             "CC-MAIN-2021-31-PDF-UNTRUNCATED")
 LAST_ZIP = 7932
 _USER_AGENT = "pdf-bookmarker-harvest/0.1"
-# pdfTeX, XeTeX, LuaHBTeX, dvips, dvipdfmx, and arXiv's rewritten
-# "arXiv GenPDF (tex2pdf:...)" — "tex\b" so "Textmaker" is not one.
-_TEX_RE = re.compile(r"tex\b|tex2pdf|latex|dvips|dvipdfm", re.IGNORECASE)
 _MIN_ALPHA_TOKENS = 200  # Tika's count; a scan or an image-only PDF has ~0
 
 
@@ -74,10 +71,6 @@ def parse_zip_spec(spec: str) -> list[int]:
     if bad:
         raise ValueError(f"zip index out of range 0..{LAST_ZIP}: {sorted(bad)}")
     return sorted(indices)
-
-
-def is_tex(producer: str) -> bool:
-    return bool(_TEX_RE.search(producer))
 
 
 class HttpRangeFile(io.RawIOBase):

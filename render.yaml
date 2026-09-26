@@ -11,6 +11,9 @@ services:
       - key: PDF_BOOKMARKER_LABELER
         # Must match where backend/Dockerfile puts the release asset.
         value: /srv/models/labeler.joblib
+      - key: PDF_BOOKMARKER_LABELER_NONTEX
+        # The model for non-LaTeX PDFs; must match backend/Dockerfile too.
+        value: /srv/models/labeler-nontex.joblib
       - key: REQUIRE_LABELER
         # This deployment exists to serve the heading model, so a build that
         # somehow lacks it should fail to boot rather than quietly answer with

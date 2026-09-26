@@ -261,6 +261,26 @@ def test_the_labeler_is_loaded_at_startup(monkeypatch):
     assert calls == [None]  # resolved from the environment, not a hardcoded path
 
 
+def test_a_broken_nontex_labeler_path_stops_startup(monkeypatch, tmp_path):
+    monkeypatch.delenv("PDF_BOOKMARKER_LABELER", raising=False)
+    monkeypatch.setenv("PDF_BOOKMARKER_LABELER_NONTEX", str(tmp_path / "missing.joblib"))
+    with pytest.raises(RuntimeError, match="PDF_BOOKMARKER_LABELER_NONTEX"):
+        create_app()
+
+
+def test_the_nontex_labeler_is_loaded_at_startup(monkeypatch):
+    from app import main as main_module
+
+    calls = []
+    monkeypatch.setattr(main_module, "resolve_labeler", lambda path: "model")
+    monkeypatch.setattr(
+        main_module, "resolve_nontex_labeler",
+        lambda path: calls.append(path) or "nontex model",
+    )
+    create_app()
+    assert calls == [None]
+
+
 def test_startup_logs_whether_the_labeler_is_active(monkeypatch, caplog):
     """create_app runs at import, before uvicorn configures logging; a status
     line emitted there is swallowed and the operator never sees it."""
