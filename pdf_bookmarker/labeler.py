@@ -25,6 +25,27 @@ The LLM row is the GGUF that ships. The 4-bit adapter it was merged from is
 which. (A file claiming to be the GGUF's predictions was in fact a labeler
 union, and briefly made the two look 3.7 F1 apart; see issue #17.)
 
+**Those numbers are LaTeX numbers.** 66 of the 76 documents are TeX output,
+and the model was trained on 87% LaTeX. On web PDFs (CC-MAIN-2021-31, fetched
+with `training/fetch_ccpdf.py`, gold filtered to documents whose bookmarks
+align with their lines) it falls below the heuristics. A second bundle — the
+same features, trained with 252 web documents added, its threshold (0.40)
+tuned on the 49 non-LaTeX validation documents — serves every document
+`producer.document_is_tex` rejects, while TeX documents keep this one:
+
+                              76 (LaTeX)   81 held-out web
+    font heuristics             0.6208        0.5420
+    this model alone            0.8009        0.4221
+    + non-LaTeX model           0.7943        0.6531
+
+Against this model alone: web +0.2310, CI [+0.1508, +0.3129], 56 documents
+better against 23; on the 76, only the 10 non-LaTeX documents change, −0.0066,
+CI [−0.0155, +0.0013]. The same detector with one threshold for all documents
+(0.45, tuned on the mixed validation set) costs 0.041 on LaTeX (0.7603) —
+headings score lower on web PDFs, so a threshold low enough for them admits
+too much on LaTeX — which is why it is a second model rather than a
+replacement.
+
 The model is a pair of fitted scikit-learn estimators produced by
 `training/train_line_labeler.py --save-model`. scikit-learn and joblib are the
 `[labeler]` extra and are imported lazily, so a pipeline with no labeler

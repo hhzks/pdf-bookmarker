@@ -28,6 +28,7 @@ locally as a command-line tool.
 | `--dry-run` | print the outline, write nothing |
 | `--force` | replace bookmarks the PDF already has |
 | `--labeler PATH` | use the trained heading model |
+| `--labeler-nontex PATH` | use a second heading model for PDFs not made with LaTeX |
 | `--llm` / `--no-llm` | always / never call the LLM (default: only when needed) |
 | `--model SPEC` | choose the LLM (see below) |
 | `--ocr auto\|force\|never` | when to OCR (default `auto`: only if there is no text) |
@@ -44,6 +45,16 @@ key.
 
 Set `PDF_BOOKMARKER_LABELER=labeler.joblib` to use it without the flag.
 
+The model above was trained mostly on LaTeX papers. For PDFs made with other
+software (Word, InDesign and similar), add the second model. The tool reads
+the PDF's producer and uses the second model for every PDF not made with
+LaTeX:
+
+    curl -LO https://github.com/hhzks/pdf-bookmarker/releases/download/labeler-nontex-v1/labeler-nontex.joblib
+    pdf-bookmarker input.pdf --labeler labeler.joblib --labeler-nontex labeler-nontex.joblib
+
+Set `PDF_BOOKMARKER_LABELER_NONTEX` to use it without the flag.
+
 ### Results
 
 Measured on 76 held-out documents (reproduce with `training/route_check.py`):
@@ -55,6 +66,15 @@ Measured on 76 held-out documents (reproduce with `training/route_check.py`):
 | heading model | 0% | 0.80 | **0.89** |
 | heading model + LLM when needed (default) | 38% | 0.82 | 0.89 |
 | heading model + `--llm` | 100% | **0.83** | 0.88 |
+
+66 of these 76 documents are LaTeX. On 81 held-out web PDFs (Word, InDesign,
+HTML converters and others), with no LLM:
+
+| configuration | title F1 |
+|---|---|
+| font rules only | 0.54 |
+| heading model | 0.42 |
+| heading model + non-LaTeX model | **0.65** |
 
 - **Title F1:** how well the found headings match the real ones.
 - **Level accuracy:** how often a found heading sits at the correct depth.
@@ -113,14 +133,18 @@ files are deleted after one hour.
 |---|---|
 | `ALLOWED_ORIGINS` | comma-separated CORS allowlist |
 | `PDF_BOOKMARKER_LABELER` | path to the heading model; unset means font rules only |
+| `PDF_BOOKMARKER_LABELER_NONTEX` | path to the model for PDFs not made with LaTeX; unset means the heading model for all PDFs |
 | `REQUIRE_LABELER` | if `true`, refuse to start without a working heading model |
 | `VERIFICATION_MODEL` | server-side LLM; unset by default (the server runs no LLM) |
 | `PDF_BOOKMARKER_LOCAL_N_GPU_LAYERS` | GPU layers for a local model (`-1` = all) |
 | `OCR_MAX_PAGES` | reject scans longer than this (default 50) |
 
 The Docker image (`backend/Dockerfile`) downloads the heading model from the
-`labeler-v1` release and checks its SHA-256. To ship a retrained model, upload
-a new release asset, then update `LABELER_VERSION` and `LABELER_SHA256`.
+`labeler-v1` release and the non-LaTeX model from the `labeler-nontex-v1`
+release, and checks the SHA-256 of each. To ship a retrained model, upload a
+new release asset, then update that model's two build arguments
+(`LABELER_VERSION` and `LABELER_SHA256`, or `LABELER_NONTEX_VERSION` and
+`LABELER_NONTEX_SHA256`).
 
 If you enable `VERIFICATION_MODEL`, also update the frontend's "This server
 runs the heading model only" note.

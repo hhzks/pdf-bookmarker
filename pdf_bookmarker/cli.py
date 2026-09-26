@@ -26,6 +26,10 @@ def build_parser() -> argparse.ArgumentParser:
                         help="path to a line-labeling model (see "
                         "training/train_line_labeler.py --save-model); also "
                         "settable via PDF_BOOKMARKER_LABELER")
+    parser.add_argument("--labeler-nontex", type=Path, default=None,
+                        help="heading model for PDFs not produced by TeX (Word, "
+                        "InDesign, ...), which the main model was not trained "
+                        "on; also settable via PDF_BOOKMARKER_LABELER_NONTEX")
     parser.add_argument("--llm-density", type=float,
                         default=llm.SPARSE_ENTRIES_PER_PAGE, metavar="N",
                         help="in auto mode with a labeler, call the LLM when it "
@@ -58,6 +62,7 @@ def main(argv: list[str] | None = None) -> int:
             ocr_mode=args.ocr,
             labeler_path=args.labeler,
             llm_density=args.llm_density,
+            nontex_labeler_path=args.labeler_nontex,
         )
     except pipeline.ExistingBookmarksError:
         print("error: PDF already has bookmarks; use --force to replace them",

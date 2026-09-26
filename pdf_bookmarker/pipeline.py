@@ -13,6 +13,7 @@ from . import (
     locator,
     merge,
     ocr,
+    producer,
     toc_detector,
     writer,
 )
@@ -86,12 +87,15 @@ def process_pdf(
     ocr_max_pages: int | None = None,
     labeler_path: str | Path | None = None,
     llm_density: float = llm.SPARSE_ENTRIES_PER_PAGE,
+    nontex_labeler_path: str | Path | None = None,
 ) -> PipelineResult:
     """Detect an outline in input_path and write it to output_path.
 
     output_path=None is a dry run: detect only, write nothing.
     llm_density is the auto-mode routing threshold for the labeler path, in
     headings per page (0 never escalates on it).
+    nontex_labeler_path, when set, replaces the labeler for every document
+    whose producer is not TeX (see producer.document_is_tex).
     Raises a PipelineError subclass (or llm.UnknownProviderError) on failure.
     """
     if llm_mode not in ("auto", "always", "never"):
@@ -134,12 +138,21 @@ def process_pdf(
                 raise NoTextLayerError(_NO_TEXT_MESSAGE)
             used_ocr = False
         model = resolve_labeler(labeler_path)
+        nontex_model = resolve_nontex_labeler(nontex_labeler_path)
+        if nontex_model is not None and not producer.document_is_tex(doc):
+            # The LaTeX-trained labeler does not transfer: on 81 held-out web
+            # PDFs it scores 0.4221 title F1 against the heuristics' 0.5420.
+            # The non-LaTeX model (the same features, trained with web
+            # documents added, its threshold tuned on non-LaTeX validation
+            # documents) scores 0.6531 there, while LaTeX documents keep the
+            # model they were measured on. See labeler.py for the table.
+            model = nontex_model
         used_labeler = False
         entries = []
         if model is not None:
-            # The labeler beats the heuristic path outright (0.8009 vs 0.6208
-            # title F1) and its entries already carry an exact physical page,
-            # so there is nothing for the locator to do and no TOC to parse.
+            # On LaTeX the labeler beats the heuristic path outright (0.8009 vs
+            # 0.6208 title F1) and its entries already carry an exact physical
+            # page, so there is nothing for the locator to do and no TOC to parse.
             toc_pages = toc_detector.find_toc_pages(lines, doc.page_count)
             entries = model.detect(lines, doc.page_count)
             failures, used_toc, used_labeler = 0, False, True
@@ -210,10 +223,12 @@ def process_pdf(
 
 
 _LABELER_ENV = "PDF_BOOKMARKER_LABELER"
+_NONTEX_LABELER_ENV = "PDF_BOOKMARKER_LABELER_NONTEX"
 
-# Last model loaded, as ((path, mtime, size), model). One slot: a deployment
-# serves one model, and a second path simply evicts the first.
-_CACHED_LABELER: tuple[tuple[str, int, int], object] | None = None
+# Loaded models by path, as {path: ((mtime, size), model)}. One slot per path,
+# not one overall: a deployment serving both models resolves both on every
+# job, and a single slot would unpickle them alternately forever.
+_CACHED_LABELERS: dict[str, tuple[tuple[int, int], object]] = {}
 
 
 def resolve_labeler(labeler_path: str | Path | None):
@@ -222,16 +237,28 @@ def resolve_labeler(labeler_path: str | Path | None):
     Off unless asked for: an install with no model behaves exactly as before.
     The env var exists so a deployment can enable it without every caller
     threading a path through.
-
-    The bundle is cached across calls — the web worker resolves once per job,
-    and unpickling a 1.7 MB model per PDF is pure latency. The cache key
-    includes the file's mtime and size, so replacing the model on disk takes
-    effect without a restart. Two threads racing here both load and one wins
-    the slot; either model is valid, so the store stays lock-free like the rest
-    of the worker path.
     """
-    global _CACHED_LABELER
-    path = labeler_path or os.environ.get(_LABELER_ENV)
+    return _load_labeler(labeler_path or os.environ.get(_LABELER_ENV))
+
+
+def resolve_nontex_labeler(labeler_path: str | Path | None):
+    """Load the model for documents not produced by TeX, or None.
+
+    Also off unless asked for, and without it every document gets the
+    labeler above — the behaviour before this model existed.
+    """
+    return _load_labeler(labeler_path or os.environ.get(_NONTEX_LABELER_ENV))
+
+
+def _load_labeler(path: str | Path | None):
+    """Load a bundle through the cache.
+
+    The web worker resolves once per job, and unpickling a 5 MB model per PDF
+    is pure latency. The cache key includes the file's mtime and size, so
+    replacing the model on disk takes effect without a restart. Two threads
+    racing here both load and one wins the slot; either model is valid, so the
+    store stays lock-free like the rest of the worker path.
+    """
     if not path:
         return None
     path = Path(path)
@@ -239,12 +266,12 @@ def resolve_labeler(labeler_path: str | Path | None):
         info = path.stat()
     except OSError:
         return labeler_module.Labeler.load(path)  # missing/unreadable: let it say so
-    key = (str(path), info.st_mtime_ns, info.st_size)
-    cached = _CACHED_LABELER
+    key = (info.st_mtime_ns, info.st_size)
+    cached = _CACHED_LABELERS.get(str(path))
     if cached is not None and cached[0] == key:
         return cached[1]
     model = labeler_module.Labeler.load(path)
-    _CACHED_LABELER = (key, model)
+    _CACHED_LABELERS[str(path)] = (key, model)
     return model
 
 

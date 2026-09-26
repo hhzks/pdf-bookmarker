@@ -30,9 +30,21 @@ RUN mkdir -p /srv/models \
         "https://github.com/hhzks/pdf-bookmarker/releases/download/${LABELER_VERSION}/labeler.joblib" \
     && echo "${LABELER_SHA256}  /srv/models/labeler.joblib" | sha256sum -c -
 
-# Default for a plain `docker run`; render.yaml declares it too, so the
+# The model for PDFs not produced by TeX (Word, InDesign, report generators).
+# The model above was trained on 87% LaTeX and scores 0.4221 title F1 on
+# held-out web PDFs, below the font heuristics; this one scores 0.6531 there.
+# Same release/digest discipline: a retrain of either is a new asset plus a
+# bump of its own two ARGs.
+ARG LABELER_NONTEX_VERSION=labeler-nontex-v1
+ARG LABELER_NONTEX_SHA256=4be3044292ec9d8839b1246063776ee15fc2b15f0877f9e4c178ca7c7e70b9dc
+RUN curl -fsSL -o /srv/models/labeler-nontex.joblib \
+        "https://github.com/hhzks/pdf-bookmarker/releases/download/${LABELER_NONTEX_VERSION}/labeler-nontex.joblib" \
+    && echo "${LABELER_NONTEX_SHA256}  /srv/models/labeler-nontex.joblib" | sha256sum -c -
+
+# Defaults for a plain `docker run`; render.yaml declares them too, so the
 # deployment's configuration is readable without opening the Dockerfile.
 ENV PDF_BOOKMARKER_LABELER=/srv/models/labeler.joblib
+ENV PDF_BOOKMARKER_LABELER_NONTEX=/srv/models/labeler-nontex.joblib
 
 COPY backend/app ./app
 

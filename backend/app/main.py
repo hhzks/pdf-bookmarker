@@ -9,7 +9,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from pdf_bookmarker.labeler import LabelerError
-from pdf_bookmarker.pipeline import resolve_labeler
+from pdf_bookmarker.pipeline import resolve_labeler, resolve_nontex_labeler
 
 from .jobs import JobStore
 from .ratelimit import RateLimiter
@@ -102,6 +102,18 @@ def _load_labeler() -> str:
         raise RuntimeError(
             f"PDF_BOOKMARKER_LABELER is set but the model cannot be used: {exc}"
         ) from exc
+    # The non-LaTeX model gets the same treatment: optional, but a path that is
+    # set and broken fails the boot rather than every non-LaTeX upload.
+    try:
+        nontex = resolve_nontex_labeler(None)
+    except LabelerError as exc:
+        raise RuntimeError(
+            f"PDF_BOOKMARKER_LABELER_NONTEX is set but the model cannot be used: {exc}"
+        ) from exc
+    nontex_note = (
+        f"; non-LaTeX documents use {os.environ.get('PDF_BOOKMARKER_LABELER_NONTEX')}"
+        if nontex is not None else ""
+    )
     if model is None:
         if required:
             raise RuntimeError(
@@ -113,9 +125,12 @@ def _load_labeler() -> str:
             )
         return (
             "no line labeler configured (PDF_BOOKMARKER_LABELER); the pipeline "
-            "will use TOC parsing and font heuristics"
+            "will use TOC parsing and font heuristics" + nontex_note
         )
-    return f"line labeler loaded from {os.environ.get('PDF_BOOKMARKER_LABELER')}"
+    return (
+        f"line labeler loaded from {os.environ.get('PDF_BOOKMARKER_LABELER')}"
+        + nontex_note
+    )
 
 
 def _check_verification_model() -> tuple[int, str]:

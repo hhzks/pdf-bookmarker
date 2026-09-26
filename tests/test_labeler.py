@@ -6,6 +6,13 @@ from pdf_bookmarker.extractor import Line
 from pdf_bookmarker.models import OutlineEntry
 
 
+@pytest.fixture(autouse=True)
+def _no_ambient_nontex_model(monkeypatch):
+    """Most tests here stub resolve_labeler alone; a non-LaTeX model set in the
+    developer's shell would silently replace their stub on non-TeX fixtures."""
+    monkeypatch.delenv("PDF_BOOKMARKER_LABELER_NONTEX", raising=False)
+
+
 class FakeClassifier:
     """Stands in for a fitted sklearn estimator.
 
@@ -233,6 +240,76 @@ def test_a_labeler_that_finds_nothing_falls_back_to_the_heuristics(toc_pdf, monk
     assert result.used_toc is True
 
 
+# --- the non-LaTeX model ------------------------------------------------------
+
+@pytest.fixture
+def tex_pdf(toc_pdf, tmp_path):
+    """toc_pdf's pages, stamped as pdfTeX output."""
+    import fitz
+
+    doc = fitz.open(toc_pdf)
+    doc.set_metadata({"producer": "pdfTeX-1.40.25"})
+    path = tmp_path / "tex.pdf"
+    doc.save(path)
+    return path
+
+
+def _models(monkeypatch):
+    """Two stubs that report which of them ran, by the level they assign."""
+    from pdf_bookmarker import pipeline
+
+    main, nontex = make(level=1), make(level=2)
+    monkeypatch.setattr(pipeline, "resolve_labeler", lambda path: main)
+    monkeypatch.setattr(pipeline, "resolve_nontex_labeler", lambda path: nontex)
+
+
+def _levels(result):
+    return {e.level for e in result.entries}
+
+
+def test_a_non_tex_document_gets_the_non_tex_model(toc_pdf, monkeypatch):
+    from pdf_bookmarker import pipeline
+
+    _models(monkeypatch)
+    result = pipeline.process_pdf(toc_pdf, None, llm_mode="never")
+    assert result.used_labeler is True
+    assert _levels(result) == {2}
+
+
+def test_a_tex_document_keeps_the_main_model(tex_pdf, monkeypatch):
+    """LaTeX is what the main model was measured on (0.8009); the non-LaTeX
+    model scores 0.7603 there, so it must not reach these documents."""
+    from pdf_bookmarker import pipeline
+
+    _models(monkeypatch)
+    result = pipeline.process_pdf(tex_pdf, None, llm_mode="never")
+    assert _levels(result) == {1}
+
+
+def test_without_a_non_tex_model_every_document_gets_the_main_one(toc_pdf, monkeypatch):
+    from pdf_bookmarker import pipeline
+
+    monkeypatch.setattr(pipeline, "resolve_labeler", lambda path: make(level=1))
+    monkeypatch.delenv("PDF_BOOKMARKER_LABELER_NONTEX", raising=False)
+    result = pipeline.process_pdf(toc_pdf, None, llm_mode="never")
+    assert _levels(result) == {1}
+
+
+def test_the_env_var_configures_the_non_tex_model(tmp_path, monkeypatch):
+    from pdf_bookmarker import pipeline
+
+    monkeypatch.setenv("PDF_BOOKMARKER_LABELER_NONTEX", str(tmp_path / "gone.joblib"))
+    with pytest.raises(labeler.LabelerError, match="gone"):
+        pipeline.resolve_nontex_labeler(None)
+
+
+def test_no_non_tex_model_configured_resolves_to_none(monkeypatch):
+    from pdf_bookmarker import pipeline
+
+    monkeypatch.delenv("PDF_BOOKMARKER_LABELER_NONTEX", raising=False)
+    assert pipeline.resolve_nontex_labeler(None) is None
+
+
 # --- routing: when is the LLM worth calling on top of the labeler? -----------
 
 class FirstN:
@@ -389,7 +466,7 @@ def test_features_reach_the_model_as_float32():
 def clean_cache(monkeypatch):
     from pdf_bookmarker import pipeline
 
-    monkeypatch.setattr(pipeline, "_CACHED_LABELER", None, raising=False)
+    monkeypatch.setattr(pipeline, "_CACHED_LABELERS", {})
 
 
 def _count_loads(monkeypatch):
@@ -428,7 +505,9 @@ def test_a_changed_model_file_is_reloaded(tmp_path, monkeypatch, clean_cache):
     assert len(loaded) == 2
 
 
-def test_a_second_path_is_loaded_separately(tmp_path, monkeypatch, clean_cache):
+def test_two_paths_are_each_cached(tmp_path, monkeypatch, clean_cache):
+    """A server with both models resolves both per job; neither may evict the
+    other, or every job would unpickle one of them again."""
     from pdf_bookmarker import pipeline
 
     first, second = tmp_path / "a.joblib", tmp_path / "b.joblib"
@@ -436,9 +515,10 @@ def test_a_second_path_is_loaded_separately(tmp_path, monkeypatch, clean_cache):
     second.write_bytes(b"y")
     loaded = _count_loads(monkeypatch)
     pipeline.resolve_labeler(first)
-    pipeline.resolve_labeler(second)
+    pipeline.resolve_nontex_labeler(second)
     pipeline.resolve_labeler(first)
-    assert len(loaded) == 3
+    pipeline.resolve_nontex_labeler(second)
+    assert loaded == [str(first), str(second)]
 
 
 def test_a_missing_model_still_raises(tmp_path, monkeypatch, clean_cache):

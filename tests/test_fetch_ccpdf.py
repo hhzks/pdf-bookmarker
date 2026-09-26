@@ -24,20 +24,6 @@ def test_parse_zip_spec_ranges_and_lists():
         fetch_ccpdf.parse_zip_spec(str(fetch_ccpdf.LAST_ZIP + 1))
 
 
-@pytest.mark.parametrize("producer, expected", [
-    ("pdfTeX-1.40.21", True),
-    ("LuaHBTeX, Version 1.13.0", True),
-    ("dvips + GPL Ghostscript 9.50", True),
-    ("xdvipdfmx (20200315)", True),
-    ("pikepdf 8.15.1 arXiv GenPDF (tex2pdf:8def8d8)", True),
-    ("Microsoft® Word for Microsoft 365", False),
-    ("SoftMaker Textmaker", False),
-    ("Adobe InDesign CC 2015", False),
-])
-def test_is_tex(producer, expected):
-    assert fetch_ccpdf.is_tex(producer) is expected
-
-
 def _row(**overrides):
     row = {"file_name": "0000001.pdf", "parse_status": "OK", "encrypted": "f",
            "num_pages": "20", "tika_eval_num_alpha_tokens": "5000",

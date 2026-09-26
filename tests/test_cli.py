@@ -261,6 +261,21 @@ def test_labeler_flag_reaches_the_pipeline(toc_pdf, monkeypatch, tmp_path):
     assert str(captured["labeler_path"]) == "model.joblib"
 
 
+def test_labeler_nontex_flag_reaches_the_pipeline(toc_pdf, monkeypatch, tmp_path):
+    captured = _capture_pipeline(monkeypatch)
+    rc = cli.main([str(toc_pdf), "-o", str(tmp_path / "o.pdf"),
+                   "--labeler-nontex", "nontex.joblib"])
+    assert rc == 0
+    assert str(captured["nontex_labeler_path"]) == "nontex.joblib"
+
+
+def test_a_bad_labeler_nontex_path_is_a_clean_error(toc_pdf, capsys):
+    rc = cli.main([str(toc_pdf), "--labeler-nontex", "nope.joblib", "--no-llm",
+                   "--dry-run"])
+    assert rc == 2
+    assert "labeler model not found" in capsys.readouterr().err
+
+
 def test_llm_density_flag_reaches_the_pipeline(toc_pdf, monkeypatch, tmp_path):
     captured = _capture_pipeline(monkeypatch)
     rc = cli.main([str(toc_pdf), "-o", str(tmp_path / "o.pdf"), "--llm-density", "1.5"])
