@@ -53,8 +53,9 @@ BASE_URL = ("https://digitalcorpora.s3.amazonaws.com/corpora/files/"
             "CC-MAIN-2021-31-PDF-UNTRUNCATED")
 LAST_ZIP = 7932
 _USER_AGENT = "pdf-bookmarker-harvest/0.1"
-# pdfTeX, XeTeX, LuaHBTeX, dvips, dvipdfmx — "tex\b" so "Textmaker" is not one.
-_TEX_RE = re.compile(r"tex\b|latex|dvips|dvipdfm", re.IGNORECASE)
+# pdfTeX, XeTeX, LuaHBTeX, dvips, dvipdfmx, and arXiv's rewritten
+# "arXiv GenPDF (tex2pdf:...)" — "tex\b" so "Textmaker" is not one.
+_TEX_RE = re.compile(r"tex\b|tex2pdf|latex|dvips|dvipdfm", re.IGNORECASE)
 _MIN_ALPHA_TOKENS = 200  # Tika's count; a scan or an image-only PDF has ~0
 
 

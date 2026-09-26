@@ -29,6 +29,7 @@ def test_parse_zip_spec_ranges_and_lists():
     ("LuaHBTeX, Version 1.13.0", True),
     ("dvips + GPL Ghostscript 9.50", True),
     ("xdvipdfmx (20200315)", True),
+    ("pikepdf 8.15.1 arXiv GenPDF (tex2pdf:8def8d8)", True),
     ("Microsoft® Word for Microsoft 365", False),
     ("SoftMaker Textmaker", False),
     ("Adobe InDesign CC 2015", False),
