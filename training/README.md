@@ -25,6 +25,24 @@ formal printed TOCs — the best printed_page training data. There is no
 directory listing, so the fetcher probes the predictable nvlpubs URL space
 (highest revision first); 404s are expected.
 
+```bash
+python training/fetch_ccpdf.py --zips 0-3 -o corpus/ccpdf --max 200 \
+    --metadata corpus/tika-20230714.csv.gz
+```
+
+Web PDFs from CC-MAIN-2021-31-PDF-UNTRUNCATED (~7.9M files, 1,000 per ZIP) —
+Word, InDesign, Distiller and report generators, where arXiv and NIST are
+mostly LaTeX. It reads each 1-2.8 GB ZIP by HTTP range requests and fetches
+members one at a time, keeping only those that pass harvest's gate (outline,
+text layer, `--min-pages`); LaTeX producers are skipped unless
+`--include-tex`. About 7% of members survive: ZIP 0 kept 8 of the first 109,
+at ~1.6 s per member. `--metadata` (the corpus's Tika table, 450 MB, from
+`metadata/` beside `zipfiles/`) drops short, encrypted, textless and LaTeX
+files before download — over half of ZIP 0's rejects were too short.
+`manifest.jsonl` records every member tried, so re-runs skip them. These are
+crawled documents under Common Crawl's terms, not an open license: keep them
+private.
+
 You can also drop PDFs from any other source into a directory — harvesting is
 source-agnostic. Sources checked and rejected: govinfo CFR volumes carry no
 embedded outline (fail the harvest gate); OAPEN's legacy REST API no longer
